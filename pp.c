@@ -7,19 +7,25 @@
 #include <limits.h>
 #include <libgen.h>
 
-#define MAX_PACKAGES 100 // TODO
+#define UPDATE_FLAG 0
+#define SECURITY_UPDATE_FLAG 1
+#define MANDATORY_PKG_FLAG 2
+#define OPTIONAL_PKG_FLAG 3
+#define REMOVED_PKG_FLAG 4
 
-// package info / pkg_list
+// Package info
 typedef struct {
     char name[50];
     char version[20];
     char sha256[65];
     char url[256];
-    int present_in_repository; // 0=not present, 1=exist, 2=to be update, 3=to be remove, 4=security update, 5=optional, 6= mandotary
+    int package_status; // 0=update, 1=security update, 2=mandatory, 3=optional, 4=removed
+    int present_in_repository; // 0=not present, 1=exist
 } Package;
 
-Package local_packages[MAX_PACKAGES];
+Package *local_packages = NULL;
 int local_package_count = 0;
+int allocated_packages = 0;
 
 // find a package in the local_packages array by exact name
 int find_local_package(const char *package_name) {
@@ -31,7 +37,7 @@ int find_local_package(const char *package_name) {
     return -1;
 }
 
-// write to the local_packages array to pp_pkg_list (excluding removed packages)
+// write the local_packages array to pp_pkg_list (removed packages will have the REMOVED_PKG_FLAG flag in pp_pkg_list)
 void write_local_package_list() {
     FILE *file = fopen("pp_pkg_list", "w");
     if (file == NULL) {
@@ -40,15 +46,13 @@ void write_local_package_list() {
     }
 
     for (int i = 0; i < local_package_count; i++) {
-        if (local_packages[i].present_in_repository) {
-            fprintf(file, "%s %s %s %s\n",
-                    local_packages[i].name,
-                    local_packages[i].version,
-                    local_packages[i].sha256,
-                    local_packages[i].url);
-        }
+        fprintf(file, "%s %s %s %s %d\n",
+                local_packages[i].name,
+                local_packages[i].version,
+                local_packages[i].sha256,
+                local_packages[i].url,
+                local_packages[i].package_status);
     }
-
     fclose(file);
 }
 
@@ -61,92 +65,217 @@ void read_repository_package_list() {
     }
 
     char line[256]; // TODO
+
+    int repository_package_count = 0;
+    Package *repository_packages = NULL;
+    int allocated_repository_packages = 0;
+
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\n")] = 0;
 
-        char *package_name = strtok(line, " ");
+        char line_copy[256];
+        strncpy(line_copy, line, sizeof(line_copy) - 1);
+        line_copy[sizeof(line_copy) - 1] = '\0';
+
+        char *package_name = strtok(line_copy, " ");
         char *version = strtok(NULL, " ");
         char *sha256 = strtok(NULL, " ");
         char *url = strtok(NULL, " ");
-        // TODO: add array of flag
+        char *package_status_str = strtok(NULL, " ");
 
-        if (package_name && version && sha256 && url) {
-            int index = find_local_package(package_name);
+        if (package_name && version && sha256 && url && package_status_str) {
 
-            if (index != -1) {
-                local_packages[index].present_in_repository = 1;
-
-                if (strcmp(local_packages[index].version, version) != 0 ||
-                    strcmp(local_packages[index].sha256, sha256) != 0 ||
-                    strcmp(local_packages[index].url, url) != 0) {
-
-                    printf("Updating package %s: Version %s -> %s, sha256 %s -> %s, URL %s -> %s\n",
-                           package_name,
-                           local_packages[index].version, version,
-                           local_packages[index].sha256, sha256,
-                           local_packages[index].url, url);
-
-                    strncpy(local_packages[index].version, version, sizeof(local_packages[index].version) - 1);
-                    local_packages[index].version[sizeof(local_packages[index].version) - 1] = '\0';
-                    strncpy(local_packages[index].sha256, sha256, sizeof(local_packages[index].sha256) - 1);
-                    local_packages[index].sha256[sizeof(local_packages[index].sha256) - 1] = '\0';
-                    strncpy(local_packages[index].url, url, sizeof(local_packages[index].url) - 1);
-                    local_packages[index].url[sizeof(local_packages[index].url) - 1] = '\0';
-                } else {
-                    printf("Package %s is up to date.\n", package_name);
+             // dynamic allocation
+            if (repository_package_count >= allocated_repository_packages) {
+                int new_size = (allocated_repository_packages == 0) ? 10 : allocated_repository_packages * 2; // start at 10, double
+                Package *temp = realloc(repository_packages, new_size * sizeof(Package));
+                if (temp == NULL) {
+                    perror("Error reallocating memory for repository packages");
+                    fclose(file);
+                    if (repository_packages != NULL) {
+                        free(repository_packages);
+                    }
+                    return; // exit(1); ?
                 }
-            } else {
-                if (local_package_count < MAX_PACKAGES) {
-                    printf("Adding new package to local list: %s\n", package_name);
-                    strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[local_package_count].name) - 1);
-                    local_packages[local_package_count].name[sizeof(local_packages[local_package_count].name) - 1] = '\0';
-                    strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[local_package_count].version) - 1);
-                    local_packages[local_package_count].version[sizeof(local_packages[local_package_count].version) - 1] = '\0';
-                    strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[local_package_count].sha256) - 1);
-                    local_packages[local_package_count].sha256[sizeof(local_packages[local_package_count].sha256) - 1] = '\0';
-                    strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[local_package_count].url) - 1);
-                    local_packages[local_package_count].url[sizeof(local_packages[local_package_count].url) - 1] = '\0';
-                    local_packages[local_package_count].present_in_repository = 1;
-                    local_package_count++;
-                } else {
-                    printf("Warning: Maximum package limit reached. Cannot add %s\n", package_name);
-                }
+                repository_packages = temp;
+                allocated_repository_packages = new_size;
             }
+
+            strncpy(repository_packages[repository_package_count].name, package_name, sizeof(repository_packages[0].name) - 1);
+            repository_packages[repository_package_count].name[sizeof(repository_packages[0].name) - 1] = '\0';
+            strncpy(repository_packages[repository_package_count].version, version, sizeof(repository_packages[0].version) - 1);
+            repository_packages[repository_package_count].version[sizeof(repository_packages[0].version) - 1] = '\0';
+            strncpy(repository_packages[repository_package_count].sha256, sha256, sizeof(repository_packages[0].sha256) - 1);
+            repository_packages[repository_package_count].sha256[sizeof(repository_packages[0].sha256) - 1] = '\0';
+            strncpy(repository_packages[repository_package_count].url, url, sizeof(repository_packages[0].url) - 1);
+            repository_packages[repository_package_count].url[sizeof(repository_packages[0].url) - 1] = '\0';
+            repository_packages[repository_package_count].package_status = atoi(package_status_str);
+            repository_package_count++;
         } else {
             printf("Skipping invalid line in pkg_list: %s\n", line);
         }
     }
     fclose(file);
+    printf("Read %d packages from pkg_list.\n", repository_package_count); // remote repo
+
+    // compare remote repository packages with local packages and update local_packages present flag
+    for (int i = 0; i < local_package_count; i++) {
+        local_packages[i].present_in_repository = 0; // set all to not found
+    }
+
+    for (int i = 0; i < repository_package_count; i++) {
+        int index = find_local_package(repository_packages[i].name);
+
+        if (index != -1) {
+            local_packages[index].present_in_repository = 1;
+
+            // check for updates in version, sha256, url, or status(status outside for now to handle more use cases)
+            if (strcmp(local_packages[index].version, repository_packages[i].version) != 0 ||
+                strcmp(local_packages[index].sha256, repository_packages[i].sha256) != 0 ||
+                strcmp(local_packages[index].url, repository_packages[i].url) != 0) {
+
+                printf("Updating package %s: Version %s -> %s, sha256 %s -> %s, URL %s -> %s\n",
+                       repository_packages[i].name,
+                       local_packages[index].version, repository_packages[i].version,
+                       local_packages[index].sha256, repository_packages[i].sha256,
+                       local_packages[index].url, repository_packages[i].url);
+
+                strncpy(local_packages[index].version, repository_packages[i].version, sizeof(local_packages[index].version) - 1);
+                local_packages[index].version[sizeof(local_packages[index].version) - 1] = '\0';
+                strncpy(local_packages[index].sha256, repository_packages[i].sha256, sizeof(local_packages[index].sha256) - 1);
+                local_packages[index].sha256[sizeof(local_packages[index].sha256) - 1] = '\0';
+                strncpy(local_packages[index].url, repository_packages[i].url, sizeof(local_packages[index].url) - 1);
+                local_packages[index].url[sizeof(local_packages[index].url) - 1] = '\0';
+
+            } else {
+                printf("Package %s is up to date.\n", repository_packages[i].name);
+            }
+
+            if (local_packages[index].package_status != repository_packages[i].package_status) {
+                 printf("Updating package status for %s: %d -> %d\n",
+                        repository_packages[i].name, local_packages[index].package_status, 
+                        repository_packages[i].package_status);
+                local_packages[index].package_status = repository_packages[i].package_status;
+            }
+        } else { // package from repository not found in local list
+            // dynamic allocation
+            if (local_package_count >= allocated_packages) {
+                int new_size = (allocated_packages == 0) ? 10 : allocated_packages * 2; // start at 10, double
+                Package *temp = realloc(local_packages, new_size * sizeof(Package));
+                if (temp == NULL) {
+                    perror("Error reallocating memory for local packages while adding from repository");
+                    if (repository_packages != NULL) free(repository_packages);
+                    return; // exit(1); ?
+                }
+                local_packages = temp;
+                allocated_packages = new_size;
+                // printf("DEBUG: Reallocated local_packages to size %d\n", allocated_packages);
+            }
+
+            printf("Adding new package to local list from repository: %s\n", repository_packages[i].name);
+            strncpy(local_packages[local_package_count].name, repository_packages[i].name, sizeof(local_packages[0].name) - 1);
+            local_packages[local_package_count].name[sizeof(local_packages[0].name) - 1] = '\0';
+            strncpy(local_packages[local_package_count].version, repository_packages[i].version, sizeof(local_packages[0].version) - 1);
+            local_packages[local_package_count].version[sizeof(local_packages[0].version) - 1] = '\0';
+            strncpy(local_packages[local_package_count].sha256, repository_packages[i].sha256, sizeof(local_packages[0].sha256) - 1);
+            local_packages[local_package_count].sha256[sizeof(local_packages[0].sha256) - 1] = '\0';
+            strncpy(local_packages[local_package_count].url, repository_packages[i].url, sizeof(local_packages[0].url) - 1);
+            local_packages[local_package_count].url[sizeof(local_packages[0].url) - 1] = '\0';
+            local_packages[local_package_count].package_status = repository_packages[i].package_status; 
+            local_packages[local_package_count].present_in_repository = 1;
+            local_package_count++;
+        }
+    }
+
+    // free memory allocated for repository_packages
+    if (repository_packages != NULL) {
+        free(repository_packages);
+        repository_packages = NULL;
+    }
+
+    // FLAG packages in local list that are no longer in the remote repository
+    for (int i = 0; i < local_package_count; i++) {
+        if (!local_packages[i].present_in_repository) {
+            if (local_packages[i].package_status != 4) {
+                local_packages[i].package_status = 4;
+                printf("Package %s no longer exists in the repository.\n", local_packages[i].name);
+            }
+        }
+    }
+
+     if (allocated_packages > local_package_count * 2) { // If allocated is more than double needed
+         int new_size = (local_package_count == 0) ? 0 : local_package_count * 2;
+         Package *temp = realloc(local_packages, new_size * sizeof(Package));
+         if (temp != NULL || new_size == 0) { // realloc can return NULL for size 0, which is valid for freeing
+              local_packages = temp;
+             allocated_packages = new_size;
+            //  printf("DEBUG: Shrunk local_packages to size %d\n", allocated_packages);
+         }
+     }
 }
 
 // read and parse pp_pkg_list(local package list)
 void read_local_package_list() {
     FILE *file = fopen("pp_pkg_list", "r");
     if (file == NULL) {
-        for (int i = 0; i < MAX_PACKAGES; i++) {
-            local_packages[i].present_in_repository = 0;
+        // local_packages to NULL and allocated_packages to 0
+        if (local_packages != NULL) {
+            free(local_packages);
+            local_packages = NULL;
         }
+        local_package_count = 0;
+        allocated_packages = 0;
+        printf("pp_pkg_list not found. Initializing empty local package list.\n");
         return;
     }
 
-    char line[256]; // TODO: can be longer
-    while (fgets(line, sizeof(line), file) && local_package_count < MAX_PACKAGES) {
-        line[strcspn(line, "\n")] = 0;
+    // local_packages already has memory allocated, free it before re-reading
+    if (local_packages != NULL) {
+        free(local_packages);
+        local_packages = NULL;
+    }
+    local_package_count = 0;
+    allocated_packages = 0;
 
-        char *package_name = strtok(line, " ");
+    char line[256]; // TODO: can be longer
+    while (fgets(line, sizeof(line), file)) {
+        line[strcspn(line, "\n")] = 0;
+        char line_copy[256];
+        strncpy(line_copy, line, sizeof(line_copy) - 1);
+        line_copy[sizeof(line_copy) - 1] = '\0';
+
+        char *package_name = strtok(line_copy, " ");
         char *version = strtok(NULL, " ");
         char *sha256 = strtok(NULL, " ");
         char *url = strtok(NULL, " ");
+        char *package_status_str = strtok(NULL, " ");
 
-        if (package_name && version && sha256 && url) {
-            strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[local_package_count].name) - 1);
-            local_packages[local_package_count].name[sizeof(local_packages[local_package_count].name) - 1] = '\0';
-            strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[local_package_count].version) - 1);
-            local_packages[local_package_count].version[sizeof(local_packages[local_package_count].version) - 1] = '\0';
-            strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[local_package_count].sha256) - 1);
-            local_packages[local_package_count].sha256[sizeof(local_packages[local_package_count].sha256) - 1] = '\0';
-            strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[local_package_count].url) - 1);
-            local_packages[local_package_count].url[sizeof(local_packages[local_package_count].url) - 1] = '\0';
+        if (package_name && version && sha256 && url && package_status_str) { 
+             int package_status = atoi(package_status_str); // Convert status string to integer
+
+            // dynamic allocation
+            if (local_package_count >= allocated_packages) {
+                int new_size = (allocated_packages == 0) ? 10 : allocated_packages * 2;
+                Package *temp = realloc(local_packages, new_size * sizeof(Package));
+                if (temp == NULL) {
+                    perror("Error reallocating memory for packages while reading pp_pkg_list");
+                     fclose(file);
+                     return; // exit(1); free(local_packages);?
+                }
+                local_packages = temp;
+                allocated_packages = new_size;
+                // printf("DEBUG: Reallocated local_packages to size %d\n", allocated_packages);
+            }
+
+            strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[0].name) - 1);
+            local_packages[local_package_count].name[sizeof(local_packages[0].name) - 1] = '\0';
+            strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[0].version) - 1);
+            local_packages[local_package_count].version[sizeof(local_packages[0].version) - 1] = '\0';
+            strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[0].sha256) - 1);
+            local_packages[local_package_count].sha256[sizeof(local_packages[0].sha256) - 1] = '\0';
+            strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[0].url) - 1);
+            local_packages[local_package_count].url[sizeof(local_packages[0].url) - 1] = '\0';
+            local_packages[local_package_count].package_status = package_status;
             local_packages[local_package_count].present_in_repository = 0;
 
             local_package_count++;
@@ -156,6 +285,7 @@ void read_local_package_list() {
     }
 
     fclose(file);
+    printf("Read %d packages from pp_pkg_list.\n", local_package_count);
 }
 
 // search for a package
@@ -842,5 +972,12 @@ int main(int argc, char *argv[]) {
         printf("Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]\n");
         return 1;
     }
+
+    // Free allocated memory before exiting
+    if (local_packages != NULL) {
+        free(local_packages);
+        local_packages = NULL; // Set to NULL after freeing
+    }
+
     return 0;
 }
