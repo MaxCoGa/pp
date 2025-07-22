@@ -56,7 +56,7 @@ void write_local_package_list() {
     fclose(file);
 }
 
-// read and parse pkg_list (repository source)
+// read and parse pkg_list (repository source) and update local_packages TODO: update local_packages in another function
 void read_repository_package_list() {
     FILE *file = fopen("pkg_list", "r"); // TODO: should be a url
     if (file == NULL) {
