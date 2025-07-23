@@ -914,6 +914,104 @@ void upgrade_packages() {
     printf("Upgrade check complete.\n");
 }
 
+// update a specific package
+void update_package(const char *package_name) {
+    printf("Attempting to update package: %s \n", package_name);
+
+    // TODO: pass param to force update or not the local package list
+    read_local_package_list(); // Load local package list
+    read_repository_package_list(); // Update local list with repository info
+
+    int package_index = find_local_package(package_name);
+
+    if (package_index == -1) {
+        printf("Error: Package \'%s\' not found in local package list. Cannot update.\n", package_name);
+        return;
+    }
+
+    // check if the package is installed locally (exists in pp_info)
+    char pp_info_dir[512];
+    snprintf(pp_info_dir, sizeof(pp_info_dir), "pp_info/%s", package_name);
+    struct stat st;
+    int is_installed = (stat(pp_info_dir, &st) == 0 && S_ISDIR(st.st_mode));
+
+    if (!is_installed) {
+        printf("Package \'%s\' is not installed. Cannot update.\n", package_name);
+        return;
+    }
+
+    // read installed version from MANIFEST in pp_info
+    char manifest_path_in_info[512];
+    snprintf(manifest_path_in_info, sizeof(manifest_path_in_info), "%s/MANIFEST", pp_info_dir);
+    FILE *manifest_file_in_info = fopen(manifest_path_in_info, "r");
+    char installed_version[20] = ""; // buffer for installed version
+
+    if (manifest_file_in_info != NULL) {
+        char manifest_line[256];
+        while (fgets(manifest_line, sizeof(manifest_line), manifest_file_in_info)) {
+            if (strstr(manifest_line, "version:") != NULL) {
+                char *version_str = strstr(manifest_line, "version:") + strlen("version:");
+                // trim whitespace
+                while (*version_str == ' ' || *version_str == '\t') {
+                    version_str++;
+                }
+                // find end of version string, excluding newline
+                char *end = version_str;
+                while (*end != '\n' && *end != '#' && *end != '\0') {
+                    end++;
+                }
+                // null-terminate the version string at the end
+                *end = '\0';
+
+                size_t version_len = strlen(version_str); // use strlen after null-termination
+                if (version_len > 0) {
+                    strncpy(installed_version, version_str, sizeof(installed_version) - 1);
+                    installed_version[sizeof(installed_version) - 1] = '\0';
+                }
+                break;
+            }
+        }
+        fclose(manifest_file_in_info);
+    } else {
+        perror("Error opening MANIFEST file in pp_info");
+        printf("Cannot read installed version for package \'%s\'. Cannot update.\n", package_name);
+        return;
+    }
+
+    // compare versions
+    if (strcmp(local_packages[package_index].version, installed_version) > 0) {
+        printf("Upgrade available for %s (Installed: %s, Available: %s)\n",
+               package_name,
+               installed_version,
+               local_packages[package_index].version);
+
+        char confirm_upgrade[10];
+        printf("Upgrade %s? (Y/n): ", package_name);
+        if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
+            confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
+
+            if (strlen(confirm_upgrade) == 0 ||
+                strcmp(confirm_upgrade, "Y") == 0 || strcmp(confirm_upgrade, "y") == 0) {
+
+                printf("Upgrading %s...\n", package_name);
+                remove_package(package_name); // uninstall old version TODO: pass Y
+                install_package(package_name);  // install new version TODO: pass Y
+                printf("Upgrade of %s complete.\n", package_name);
+            } else if (strcmp(confirm_upgrade, "N") == 0 || strcmp(confirm_upgrade, "n") == 0) {
+                printf("Skipping upgrade for %s.\n", package_name);
+            } else {
+                printf("Invalid input. Skipping upgrade for %s.\n", package_name);
+            }
+        } else {
+            printf("Error reading confirmation input. Skipping upgrade for %s.\n", package_name);
+        }
+
+    } else {
+        printf("Package %s is already up to date (Version: %s).\n", package_name, installed_version);
+    }
+}
+
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         printf("Usage: pp [command] [package_name]\n");
@@ -965,6 +1063,12 @@ int main(int argc, char *argv[]) {
         remove_package(package_name);
     } else if (strcmp(command, "up") == 0) {
         upgrade_packages();
+    } else if (strcmp(command, "u") == 0) {
+        if (package_name == NULL) {
+            printf("Usage: pp u [package_name]\n");
+            return 1;
+        }
+        update_package(package_name);
     }
     else {
         printf("Unknown command: %s\n", command);
