@@ -16,13 +16,14 @@ Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 
 - e PACKAGENAME = search exact name
 
+- u PACKAGENAME = update a package
+
 - up = upgrade all packages that their versions(in pp_info/PACKAGENAME/MANIFEST) are lower than the one in pp_pkg_list
 
 - lu = update the local metadata file(pp_pkg_list) with the remote repo list(pkg_list for now)
 
 
 #### TODO command:
-- u PACKAGENAME -> update only the given package
 - up FLAG -> upgrade only the packages based on their flag
 
 ## TODO
