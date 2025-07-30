@@ -22,11 +22,12 @@ Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 
 - lu = update the local metadata file(pp_pkg_list) with the remote repo list(pkg_list for now) ul?
 
+- a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 = add a package in pp_pkg_list(local package list)
+
 
 #### TODO command:
 - up FLAG -> upgrade only the packages based on their flag
 - c PACKAGENAME -> compile the package if available. should be PACKAGENAME_C in pkg_list. i PACKAGENAME_C will result in the same behavior if choosen
-- a PACKAGENAME VERSION LOCAL_PATH/URL -> add a package in pp_pkg_list(local package list) with its own FLAG(5?)
 
 ## TODO
 - checksum

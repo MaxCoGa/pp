@@ -12,6 +12,7 @@
 #define MANDATORY_PKG_FLAG 2
 #define OPTIONAL_PKG_FLAG 3
 #define REMOVED_PKG_FLAG 4
+#define MANUAL_PKG_FLAG 5
 
 // Package info
 typedef struct {
@@ -19,7 +20,7 @@ typedef struct {
     char version[20];
     char sha256[65];
     char url[256];
-    int package_status; // 0=update, 1=security update, 2=mandatory, 3=optional, 4=removed
+    int package_status; // 0=update, 1=security update, 2=mandatory, 3=optional, 4=removed, 5=manual
     int present_in_repository; // 0=not present, 1=exist
 } Package;
 
@@ -1011,6 +1012,50 @@ void update_package(const char *package_name) {
     }
 }
 
+// add a package manually
+void add_package_manual(const char *package_name, const char *version, const char *url, const char *sha256) {
+    printf("Attempting to add package manually: %s version %s from %s with SHA256 %s\n", package_name, version, url, sha256);
+
+    read_local_package_list(); // load the current local package list
+
+    // check if the package already exists in the local list
+    int existing_index = find_local_package(package_name);
+    if (existing_index != -1) {
+        printf("Error: Package \'%s\' already exists in the local package list. Cannot add.\n", package_name);
+        return;
+    }
+
+    // dynamic allocation for the new package
+    if (local_package_count >= allocated_packages) {
+        int new_size = (allocated_packages == 0) ? 10 : allocated_packages * 2; // start with 10, then double
+        Package *temp = realloc(local_packages, new_size * sizeof(Package));
+        if (temp == NULL) {
+            perror("Error reallocating memory for local packages");
+            return;
+        }
+        local_packages = temp;
+        allocated_packages = new_size;
+    }
+
+    // copy the package information into the new entry
+    strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[0].name) - 1);
+    local_packages[local_package_count].name[sizeof(local_packages[0].name) - 1] = '\0';
+    strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[0].version) - 1);
+    local_packages[local_package_count].version[sizeof(local_packages[0].version) - 1] = '\0';
+    strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[0].url) - 1);
+    local_packages[local_package_count].url[sizeof(local_packages[0].url) - 1] = '\0';
+    strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[0].sha256) - 1);
+    local_packages[local_package_count].sha256[sizeof(local_packages[0].sha256) - 1] = '\0';
+
+    local_packages[local_package_count].package_status = MANUAL_PKG_FLAG; // set the manual package flag
+    local_packages[local_package_count].present_in_repository = 0; // not from the repository(only in local)
+
+    local_package_count++;
+
+    write_local_package_list();
+
+    printf("Package \'%s\' added to the local package list.\n", package_name);
+}
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -1069,18 +1114,29 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         update_package(package_name);
+    } else if (strcmp(command, "a") == 0) {
+        if (argc < 6) { // need command, package_name, version, url, and sha256
+            printf("Usage: pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256\n");
+            return 1;
+        }
+        char *package_name_a = argv[2];
+        char *version_a = argv[3];
+        char *url_a = argv[4];
+        char *sha256_a = argv[5]; // Get the SHA256 argument
+        add_package_manual(package_name_a, version_a, url_a, sha256_a);
     }
     else {
         printf("Unknown command: %s\n", command);
         printf("Usage: pp [command] [package_name]\n");
-        printf("Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]\n");
+        printf("Usage: pp [i|r|s|e|u] PACKAGENAME | pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 | pp [up|lu]\n");
         return 1;
     }
 
-    // Free allocated memory before exiting
+
+    // free allocated memory before exiting
     if (local_packages != NULL) {
         free(local_packages);
-        local_packages = NULL; // Set to NULL after freeing
+        local_packages = NULL; // set to NULL after freeing
     }
 
     return 0;
