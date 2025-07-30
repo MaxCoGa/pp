@@ -37,7 +37,7 @@ Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 - force update(reinstalling)
 - add optionnal install location parameter for install, i PACKAGENAME /PATH/TO/INSTALL/
 - keep multiple versions of the same package in pkg_list? so we will be able to chose the version that we want
-
+- package builder (b)
 
 ## paran package example: 
 [helloworld](https://github.com/MaxCoGa/helloworld-paran-package)
