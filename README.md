@@ -18,7 +18,7 @@ Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 
 - u PACKAGENAME = update a package
 
-- up = upgrade all packages that their versions(in pp_info/PACKAGENAME/MANIFEST) are lower than the one in pp_pkg_list
+- up [FLAG]= upgrade all packages that their versions(in pp_info/PACKAGENAME/MANIFEST) are lower than the one in pp_pkg_list
 
 - lu = update the local metadata file(pp_pkg_list) with the remote repo list(pkg_list for now) ul?
 
@@ -28,7 +28,6 @@ Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 
 
 #### TODO command:
-- up FLAG -> upgrade only the packages based on their flag
 - c PACKAGENAME -> compile the package if available. should be PACKAGENAME_C in pkg_list. i PACKAGENAME_C will result in the same behavior if choosen
 
 ## TODO

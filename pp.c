@@ -732,8 +732,8 @@ void remove_package(const char *package_name) {
 
 
 // upgrade packages that are installed locally (present in pp_info) but have a newer version available.
-void upgrade_packages() {
-    printf("Checking for upgrades...\n");
+void upgrade_packages(int filter_flag) {
+    printf("Checking for upgrades%s...\n", (filter_flag != -1) ? " with flag filter" : "");
 
     // TODO: lu command for this
     printf("Updating local system metadata...\n");
@@ -773,6 +773,10 @@ void upgrade_packages() {
                         while (*end != '\n' && *end != '#' && *end != '\0') {
                             end++;
                         }
+
+                        // null-terminate the version string at the end
+                        *end = '\0';
+
                         size_t version_len = end - version_str;
                         if (version_len > 0) {
                             strncpy(installed_version, version_str, sizeof(installed_version) - 1);
@@ -786,123 +790,125 @@ void upgrade_packages() {
 
             // TODO: compare versions
             if (strlen(installed_version) > 0 && strcmp(local_packages[i].version, installed_version) > 0) {
-                printf("Upgrade available for %s (Installed: %s, Available: %s)\n", 
-                        local_packages[i].name, 
-                        installed_version, 
-                        local_packages[i].version);
-                char confirm_upgrade[10];
-                printf("Upgrade %s? (Y/n): ", local_packages[i].name);
-                if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
-                    confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
+                if (filter_flag == -1 || local_packages[i].package_status == filter_flag) {
+                    printf("Upgrade available for %s (Installed: %s, Available: %s)\n", 
+                            local_packages[i].name, 
+                            installed_version, 
+                            local_packages[i].version);
+                    char confirm_upgrade[10];
+                    printf("Upgrade %s? (Y/n): ", local_packages[i].name);
+                    if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
+                        confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
 
-                    if (strlen(confirm_upgrade) == 0 ||
-                        strcmp(confirm_upgrade, "Y") == 0 || strcmp(confirm_upgrade, "y") == 0) {
+                        if (strlen(confirm_upgrade) == 0 ||
+                            strcmp(confirm_upgrade, "Y") == 0 || strcmp(confirm_upgrade, "y") == 0) {
 
-                        printf("Upgrading %s...\n", local_packages[i].name);
+                            printf("Upgrading %s...\n", local_packages[i].name);
 
-                        // uninstall the old version and install the new one.
-                        char full_manifest_content_in_info[4096] = "";
-                        char uninstall_script_name[256] = "";
+                            // uninstall the old version and install the new one.
+                            char full_manifest_content_in_info[4096] = "";
+                            char uninstall_script_name[256] = "";
 
-                        manifest_file_in_info = fopen(manifest_path_in_info, "r");
+                            manifest_file_in_info = fopen(manifest_path_in_info, "r");
 
-                        if (manifest_file_in_info != NULL) {
-                            char manifest_line_in_info[256];
-                            while (fgets(manifest_line_in_info, sizeof(manifest_line_in_info), manifest_file_in_info)) {
-                                strncat(full_manifest_content_in_info, manifest_line_in_info, sizeof(full_manifest_content_in_info) - strlen(full_manifest_content_in_info) - 1);
-                            }
-                            fclose(manifest_file_in_info);
-
-                            char *uninstall_script_line = strstr(full_manifest_content_in_info, "uninstall:");
-                            if (uninstall_script_line != NULL) {
-                                char *temp_script_name = uninstall_script_line + strlen("uninstall:");
-
-                                // trim whitespace
-                                while (*temp_script_name == ' ' || *temp_script_name == '\t') {
-                                    temp_script_name++;
+                            if (manifest_file_in_info != NULL) {
+                                char manifest_line_in_info[256];
+                                while (fgets(manifest_line_in_info, sizeof(manifest_line_in_info), manifest_file_in_info)) {
+                                    strncat(full_manifest_content_in_info, manifest_line_in_info, sizeof(full_manifest_content_in_info) - strlen(full_manifest_content_in_info) - 1);
                                 }
+                                fclose(manifest_file_in_info);
 
-                                // end of script name
-                                char *end = temp_script_name;
-                                while (*end != '\n' && *end != '#' && *end != '\0') {
-                                    end++;
-                                }
-                                size_t name_len = end - temp_script_name;
-                                if (name_len > 0) {
-                                     strncpy(uninstall_script_name, temp_script_name, sizeof(uninstall_script_name) - 1);
-                                     uninstall_script_name[sizeof(uninstall_script_name) - 1] = '\0';
-                                }
-                            }
-                        } else {
-                            perror("Error reading MANIFEST for old version uninstall script");
-                        }
+                                char *uninstall_script_line = strstr(full_manifest_content_in_info, "uninstall:");
+                                if (uninstall_script_line != NULL) {
+                                    char *temp_script_name = uninstall_script_line + strlen("uninstall:");
 
-
-                        if (strlen(uninstall_script_name) > 0) {
-                             char uninstall_script_relative_path[512];
-                            snprintf(uninstall_script_relative_path, sizeof(uninstall_script_relative_path), "%s/%s", pp_info_dir, uninstall_script_name);
-                            printf("Executing uninstall script for old version: %s\n", uninstall_script_relative_path);
-
-                            char full_uninstall_script_path[PATH_MAX];
-                            if (realpath(uninstall_script_relative_path, full_uninstall_script_path) == NULL) {
-                                 perror("Error getting full path for uninstall script");
-                                printf("Could not get full path for uninstall script '%s'. Skipping uninstall.\n", uninstall_script_relative_path);
-                            } else {
-                                 printf("Full uninstall script path: %s\n", full_uninstall_script_path);
-                                if (chmod(full_uninstall_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
-                                     printf("Made uninstall script executable.\n");
-                                    int script_status = system(full_uninstall_script_path);
-                                    if (script_status != 0) {
-                                        printf("Error executing uninstall script for old version: script failed with status %d\n", script_status);
-                                    } else {
-                                        printf("Uninstall script for old version executed successfully.\n");
+                                    // trim whitespace
+                                    while (*temp_script_name == ' ' || *temp_script_name == '\t') {
+                                        temp_script_name++;
                                     }
+
+                                    // end of script name
+                                    char *end = temp_script_name;
+                                    while (*end != '\n' && *end != '#' && *end != '\0') {
+                                        end++;
+                                    }
+                                    size_t name_len = end - temp_script_name;
+                                    if (name_len > 0) {
+                                        strncpy(uninstall_script_name, temp_script_name, sizeof(uninstall_script_name) - 1);
+                                        uninstall_script_name[sizeof(uninstall_script_name) - 1] = '\0';
+                                    }
+                                }
+                            } else {
+                                perror("Error reading MANIFEST for old version uninstall script");
+                            }
+
+
+                            if (strlen(uninstall_script_name) > 0) {
+                                char uninstall_script_relative_path[512];
+                                snprintf(uninstall_script_relative_path, sizeof(uninstall_script_relative_path), "%s/%s", pp_info_dir, uninstall_script_name);
+                                printf("Executing uninstall script for old version: %s\n", uninstall_script_relative_path);
+
+                                char full_uninstall_script_path[PATH_MAX];
+                                if (realpath(uninstall_script_relative_path, full_uninstall_script_path) == NULL) {
+                                    perror("Error getting full path for uninstall script");
+                                    printf("Could not get full path for uninstall script '%s'. Skipping uninstall.\n", uninstall_script_relative_path);
                                 } else {
-                                     perror("Error making uninstall script executable");
-                                    printf("Could not make uninstall script '%s' executable. Skipping uninstall.\n", full_uninstall_script_path);
+                                    printf("Full uninstall script path: %s\n", full_uninstall_script_path);
+                                    if (chmod(full_uninstall_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
+                                        printf("Made uninstall script executable.\n");
+                                        int script_status = system(full_uninstall_script_path);
+                                        if (script_status != 0) {
+                                            printf("Error executing uninstall script for old version: script failed with status %d\n", script_status);
+                                        } else {
+                                            printf("Uninstall script for old version executed successfully.\n");
+                                        }
+                                    } else {
+                                        perror("Error making uninstall script executable");
+                                        printf("Could not make uninstall script '%s' executable. Skipping uninstall.\n", full_uninstall_script_path);
+                                    }
+                                }
+                            } else {
+                                printf("No uninstall script specified in MANIFEST for old version.\n");
+                            }
+
+                            // elements to remove, manifest and uninstall script, directory
+                            printf("Removing package info directory for old version: %s\n", pp_info_dir);
+                            char old_manifest_path[512];
+                            snprintf(old_manifest_path, sizeof(old_manifest_path), "%s/MANIFEST", pp_info_dir);
+                            printf("Removing old MANIFEST file: %s\n", old_manifest_path);
+                            if (remove(old_manifest_path) != 0) {
+                                perror("Error removing old MANIFEST file");
+                            } else {
+                                printf("Old MANIFEST file removed.\n");
+                            }
+
+                            if (strlen(uninstall_script_name) > 0) {
+                                char old_uninstall_script_path[512];
+                                snprintf(old_uninstall_script_path, sizeof(old_uninstall_script_path), "%s/%s", pp_info_dir, uninstall_script_name);
+                                printf("Removing old uninstall script: %s\n", old_uninstall_script_path);
+                                if (remove(old_uninstall_script_path) != 0) {
+                                    perror("Error removing old uninstall script");
+                                } else {
+                                    printf("Old uninstall script removed.\n");
                                 }
                             }
-                        } else {
-                            printf("No uninstall script specified in MANIFEST for old version.\n");
-                        }
 
-                        // elements to remove, manifest and uninstall script, directory
-                        printf("Removing package info directory for old version: %s\n", pp_info_dir);
-                        char old_manifest_path[512];
-                        snprintf(old_manifest_path, sizeof(old_manifest_path), "%s/MANIFEST", pp_info_dir);
-                        printf("Removing old MANIFEST file: %s\n", old_manifest_path);
-                        if (remove(old_manifest_path) != 0) {
-                            perror("Error removing old MANIFEST file");
+                            if (rmdir(pp_info_dir) == -1) {
+                                perror("Error removing package info directory for old version");
+                                printf("Directory might not be empty after uninstall. You might need to manually remove the directory: %s\n", pp_info_dir);
+                            } else {
+                                printf("Package info directory for old version removed.\n");
+                            }
+                            printf("Installing new version of %s...\n", local_packages[i].name);
+                            install_package(local_packages[i].name);
+                        } else if (strcmp(confirm_upgrade, "N") == 0 || strcmp(confirm_upgrade, "n") == 0) {
+                            printf("Skipping upgrade for %s.\n", local_packages[i].name);
                         } else {
-                            printf("Old MANIFEST file removed.\n");
+                            printf("Invalid input. Skipping upgrade for %s.\n", local_packages[i].name);
                         }
-
-                        if (strlen(uninstall_script_name) > 0) {
-                            char old_uninstall_script_path[512];
-                             snprintf(old_uninstall_script_path, sizeof(old_uninstall_script_path), "%s/%s", pp_info_dir, uninstall_script_name);
-                             printf("Removing old uninstall script: %s\n", old_uninstall_script_path);
-                             if (remove(old_uninstall_script_path) != 0) {
-                                 perror("Error removing old uninstall script");
-                             } else {
-                                 printf("Old uninstall script removed.\n");
-                             }
-                        }
-
-                        if (rmdir(pp_info_dir) == -1) {
-                            perror("Error removing package info directory for old version");
-                            printf("Directory might not be empty after uninstall. You might need to manually remove the directory: %s\n", pp_info_dir);
-                        } else {
-                            printf("Package info directory for old version removed.\n");
-                        }
-                        printf("Installing new version of %s...\n", local_packages[i].name);
-                        install_package(local_packages[i].name);
-                    } else if (strcmp(confirm_upgrade, "N") == 0 || strcmp(confirm_upgrade, "n") == 0) {
-                        printf("Skipping upgrade for %s.\n", local_packages[i].name);
                     } else {
-                        printf("Invalid input. Skipping upgrade for %s.\n", local_packages[i].name);
+                        printf("Error reading confirmation input. Skipping upgrade for %s.\n", local_packages[i].name);
                     }
-                } else {
-                    printf("Error reading confirmation input. Skipping upgrade for %s.\n", local_packages[i].name);
                 }
             } else {
                 printf("Package %s is installed and up to date (Version: %s).\n",
@@ -962,7 +968,7 @@ void update_package(const char *package_name) {
                     end++;
                 }
                 // null-terminate the version string at the end
-                *end = '\0';
+                *end = '\0'; // remove next line
 
                 size_t version_len = strlen(version_str); // use strlen after null-termination
                 if (version_len > 0) {
@@ -1132,7 +1138,20 @@ int main(int argc, char *argv[]) {
         }
         remove_package(package_name);
     } else if (strcmp(command, "up") == 0) {
-        upgrade_packages();
+        int filter_flag = -1; // default to no filter
+        if (argc > 2) {
+            char *flag_arg = argv[2];
+            char *endptr;
+            long flag_value = strtol(flag_arg, &endptr, 10);
+
+            if (*endptr == '\0' && endptr != flag_arg) {
+                filter_flag = (int)flag_value;
+            } else {
+                printf("Warning: Invalid flag argument for 'up' command. Upgrading all applicable packages.\n");
+                // keep filter_flag as -1 for no filter
+            }
+        }
+        upgrade_packages(filter_flag); // Pass the filter flag
     } else if (strcmp(command, "u") == 0) {
         if (package_name == NULL) {
             printf("Usage: pp u [package_name]\n");
@@ -1160,7 +1179,7 @@ int main(int argc, char *argv[]) {
     else {
         printf("Unknown command: %s\n", command);
         printf("Usage: pp [command] [package_name]\n");
-        printf("Usage: pp [i|r|s|e|u] PACKAGENAME | pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 | pp l FLAG | pp [up|lu]\n");
+        printf("Usage: pp [i|r|s|e|u] PACKAGENAME | pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 | pp l FLAG | pp [up [FLAG]|lu]\n");
         return 1;
     }
 
