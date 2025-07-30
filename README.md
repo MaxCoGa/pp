@@ -24,6 +24,8 @@ Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 
 - a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 = add a package in pp_pkg_list(local package list)
 
+- l FLAG = list packages with the specified flag value
+
 
 #### TODO command:
 - up FLAG -> upgrade only the packages based on their flag

@@ -1057,6 +1057,31 @@ void add_package_manual(const char *package_name, const char *version, const cha
     printf("Package \'%s\' added to the local package list.\n", package_name);
 }
 
+// list packages by flag
+void list_packages_by_flag(int flag) {
+    printf("Listing packages with flag %d:\n", flag);
+
+    read_local_package_list(); // load the current local package list
+
+    int found_count = 0;
+    for (int i = 0; i < local_package_count; i++) {
+        if (local_packages[i].package_status == flag) {
+            printf("  Name: %s, Version: %s, SHA256: %s, URL: %s, Status: %d\n",
+                   local_packages[i].name,
+                   local_packages[i].version,
+                   local_packages[i].sha256,
+                   local_packages[i].url,
+                   local_packages[i].package_status);
+            found_count++;
+        }
+    }
+
+    if (found_count == 0) {
+        printf("No packages found with flag %d.\n", flag);
+    }
+}
+
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         printf("Usage: pp [command] [package_name]\n");
@@ -1124,11 +1149,18 @@ int main(int argc, char *argv[]) {
         char *url_a = argv[4];
         char *sha256_a = argv[5]; // Get the SHA256 argument
         add_package_manual(package_name_a, version_a, url_a, sha256_a);
+    } else if (strcmp(command, "l") == 0) {
+        if (argc < 3) {
+            printf("Usage: pp l FLAG\n");
+            return 1;
+        }
+        int flag_to_list = atoi(argv[2]); // convert the flag argument to an integer for now
+        list_packages_by_flag(flag_to_list);
     }
     else {
         printf("Unknown command: %s\n", command);
         printf("Usage: pp [command] [package_name]\n");
-        printf("Usage: pp [i|r|s|e|u] PACKAGENAME | pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 | pp [up|lu]\n");
+        printf("Usage: pp [i|r|s|e|u] PACKAGENAME | pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 | pp l FLAG | pp [up|lu]\n");
         return 1;
     }
 
