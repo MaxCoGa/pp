@@ -7,19 +7,26 @@
 #include <limits.h>
 #include <libgen.h>
 
-#define MAX_PACKAGES 100 // TODO
+#define UPDATE_FLAG 0
+#define SECURITY_UPDATE_FLAG 1
+#define MANDATORY_PKG_FLAG 2
+#define OPTIONAL_PKG_FLAG 3
+#define REMOVED_PKG_FLAG 4
+#define MANUAL_PKG_FLAG 5
 
-// package info / pkg_list
+// Package info
 typedef struct {
     char name[50];
     char version[20];
     char sha256[65];
     char url[256];
-    int present_in_repository; // 0=not present, 1=exist, 2=to be update, 3=to be remove, 4=security update, 5=optional, 6= mandotary
+    int package_status; // 0=update, 1=security update, 2=mandatory, 3=optional, 4=removed, 5=manual
+    int present_in_repository; // 0=not present, 1=exist
 } Package;
 
-Package local_packages[MAX_PACKAGES];
+Package *local_packages = NULL;
 int local_package_count = 0;
+int allocated_packages = 0;
 
 // find a package in the local_packages array by exact name
 int find_local_package(const char *package_name) {
@@ -31,7 +38,7 @@ int find_local_package(const char *package_name) {
     return -1;
 }
 
-// write to the local_packages array to pp_pkg_list (excluding removed packages)
+// write the local_packages array to pp_pkg_list (removed packages will have the REMOVED_PKG_FLAG flag in pp_pkg_list)
 void write_local_package_list() {
     FILE *file = fopen("pp_pkg_list", "w");
     if (file == NULL) {
@@ -40,19 +47,17 @@ void write_local_package_list() {
     }
 
     for (int i = 0; i < local_package_count; i++) {
-        if (local_packages[i].present_in_repository) {
-            fprintf(file, "%s %s %s %s\n",
-                    local_packages[i].name,
-                    local_packages[i].version,
-                    local_packages[i].sha256,
-                    local_packages[i].url);
-        }
+        fprintf(file, "%s %s %s %s %d\n",
+                local_packages[i].name,
+                local_packages[i].version,
+                local_packages[i].sha256,
+                local_packages[i].url,
+                local_packages[i].package_status);
     }
-
     fclose(file);
 }
 
-// read and parse pkg_list (repository source)
+// read and parse pkg_list (repository source) and update local_packages TODO: update local_packages in another function
 void read_repository_package_list() {
     FILE *file = fopen("pkg_list", "r"); // TODO: should be a url
     if (file == NULL) {
@@ -61,92 +66,217 @@ void read_repository_package_list() {
     }
 
     char line[256]; // TODO
+
+    int repository_package_count = 0;
+    Package *repository_packages = NULL;
+    int allocated_repository_packages = 0;
+
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\n")] = 0;
 
-        char *package_name = strtok(line, " ");
+        char line_copy[256];
+        strncpy(line_copy, line, sizeof(line_copy) - 1);
+        line_copy[sizeof(line_copy) - 1] = '\0';
+
+        char *package_name = strtok(line_copy, " ");
         char *version = strtok(NULL, " ");
         char *sha256 = strtok(NULL, " ");
         char *url = strtok(NULL, " ");
-        // TODO: add array of flag
+        char *package_status_str = strtok(NULL, " ");
 
-        if (package_name && version && sha256 && url) {
-            int index = find_local_package(package_name);
+        if (package_name && version && sha256 && url && package_status_str) {
 
-            if (index != -1) {
-                local_packages[index].present_in_repository = 1;
-
-                if (strcmp(local_packages[index].version, version) != 0 ||
-                    strcmp(local_packages[index].sha256, sha256) != 0 ||
-                    strcmp(local_packages[index].url, url) != 0) {
-
-                    printf("Updating package %s: Version %s -> %s, sha256 %s -> %s, URL %s -> %s\n",
-                           package_name,
-                           local_packages[index].version, version,
-                           local_packages[index].sha256, sha256,
-                           local_packages[index].url, url);
-
-                    strncpy(local_packages[index].version, version, sizeof(local_packages[index].version) - 1);
-                    local_packages[index].version[sizeof(local_packages[index].version) - 1] = '\0';
-                    strncpy(local_packages[index].sha256, sha256, sizeof(local_packages[index].sha256) - 1);
-                    local_packages[index].sha256[sizeof(local_packages[index].sha256) - 1] = '\0';
-                    strncpy(local_packages[index].url, url, sizeof(local_packages[index].url) - 1);
-                    local_packages[index].url[sizeof(local_packages[index].url) - 1] = '\0';
-                } else {
-                    printf("Package %s is up to date.\n", package_name);
+             // dynamic allocation
+            if (repository_package_count >= allocated_repository_packages) {
+                int new_size = (allocated_repository_packages == 0) ? 10 : allocated_repository_packages * 2; // start at 10, double
+                Package *temp = realloc(repository_packages, new_size * sizeof(Package));
+                if (temp == NULL) {
+                    perror("Error reallocating memory for repository packages");
+                    fclose(file);
+                    if (repository_packages != NULL) {
+                        free(repository_packages);
+                    }
+                    return; // exit(1); ?
                 }
-            } else {
-                if (local_package_count < MAX_PACKAGES) {
-                    printf("Adding new package to local list: %s\n", package_name);
-                    strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[local_package_count].name) - 1);
-                    local_packages[local_package_count].name[sizeof(local_packages[local_package_count].name) - 1] = '\0';
-                    strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[local_package_count].version) - 1);
-                    local_packages[local_package_count].version[sizeof(local_packages[local_package_count].version) - 1] = '\0';
-                    strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[local_package_count].sha256) - 1);
-                    local_packages[local_package_count].sha256[sizeof(local_packages[local_package_count].sha256) - 1] = '\0';
-                    strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[local_package_count].url) - 1);
-                    local_packages[local_package_count].url[sizeof(local_packages[local_package_count].url) - 1] = '\0';
-                    local_packages[local_package_count].present_in_repository = 1;
-                    local_package_count++;
-                } else {
-                    printf("Warning: Maximum package limit reached. Cannot add %s\n", package_name);
-                }
+                repository_packages = temp;
+                allocated_repository_packages = new_size;
             }
+
+            strncpy(repository_packages[repository_package_count].name, package_name, sizeof(repository_packages[0].name) - 1);
+            repository_packages[repository_package_count].name[sizeof(repository_packages[0].name) - 1] = '\0';
+            strncpy(repository_packages[repository_package_count].version, version, sizeof(repository_packages[0].version) - 1);
+            repository_packages[repository_package_count].version[sizeof(repository_packages[0].version) - 1] = '\0';
+            strncpy(repository_packages[repository_package_count].sha256, sha256, sizeof(repository_packages[0].sha256) - 1);
+            repository_packages[repository_package_count].sha256[sizeof(repository_packages[0].sha256) - 1] = '\0';
+            strncpy(repository_packages[repository_package_count].url, url, sizeof(repository_packages[0].url) - 1);
+            repository_packages[repository_package_count].url[sizeof(repository_packages[0].url) - 1] = '\0';
+            repository_packages[repository_package_count].package_status = atoi(package_status_str);
+            repository_package_count++;
         } else {
             printf("Skipping invalid line in pkg_list: %s\n", line);
         }
     }
     fclose(file);
+    printf("Read %d packages from pkg_list.\n", repository_package_count); // remote repo
+
+    // compare remote repository packages with local packages and update local_packages present flag
+    for (int i = 0; i < local_package_count; i++) {
+        local_packages[i].present_in_repository = 0; // set all to not found
+    }
+
+    for (int i = 0; i < repository_package_count; i++) {
+        int index = find_local_package(repository_packages[i].name);
+
+        if (index != -1) {
+            local_packages[index].present_in_repository = 1;
+
+            // check for updates in version, sha256, url, or status(status outside for now to handle more use cases)
+            if (strcmp(local_packages[index].version, repository_packages[i].version) != 0 ||
+                strcmp(local_packages[index].sha256, repository_packages[i].sha256) != 0 ||
+                strcmp(local_packages[index].url, repository_packages[i].url) != 0) {
+
+                printf("Updating package %s: Version %s -> %s, sha256 %s -> %s, URL %s -> %s\n",
+                       repository_packages[i].name,
+                       local_packages[index].version, repository_packages[i].version,
+                       local_packages[index].sha256, repository_packages[i].sha256,
+                       local_packages[index].url, repository_packages[i].url);
+
+                strncpy(local_packages[index].version, repository_packages[i].version, sizeof(local_packages[index].version) - 1);
+                local_packages[index].version[sizeof(local_packages[index].version) - 1] = '\0';
+                strncpy(local_packages[index].sha256, repository_packages[i].sha256, sizeof(local_packages[index].sha256) - 1);
+                local_packages[index].sha256[sizeof(local_packages[index].sha256) - 1] = '\0';
+                strncpy(local_packages[index].url, repository_packages[i].url, sizeof(local_packages[index].url) - 1);
+                local_packages[index].url[sizeof(local_packages[index].url) - 1] = '\0';
+
+            } else {
+                printf("Package %s is up to date.\n", repository_packages[i].name);
+            }
+
+            if (local_packages[index].package_status != repository_packages[i].package_status) {
+                 printf("Updating package status for %s: %d -> %d\n",
+                        repository_packages[i].name, local_packages[index].package_status, 
+                        repository_packages[i].package_status);
+                local_packages[index].package_status = repository_packages[i].package_status;
+            }
+        } else { // package from repository not found in local list
+            // dynamic allocation
+            if (local_package_count >= allocated_packages) {
+                int new_size = (allocated_packages == 0) ? 10 : allocated_packages * 2; // start at 10, double
+                Package *temp = realloc(local_packages, new_size * sizeof(Package));
+                if (temp == NULL) {
+                    perror("Error reallocating memory for local packages while adding from repository");
+                    if (repository_packages != NULL) free(repository_packages);
+                    return; // exit(1); ?
+                }
+                local_packages = temp;
+                allocated_packages = new_size;
+                // printf("DEBUG: Reallocated local_packages to size %d\n", allocated_packages);
+            }
+
+            printf("Adding new package to local list from repository: %s\n", repository_packages[i].name);
+            strncpy(local_packages[local_package_count].name, repository_packages[i].name, sizeof(local_packages[0].name) - 1);
+            local_packages[local_package_count].name[sizeof(local_packages[0].name) - 1] = '\0';
+            strncpy(local_packages[local_package_count].version, repository_packages[i].version, sizeof(local_packages[0].version) - 1);
+            local_packages[local_package_count].version[sizeof(local_packages[0].version) - 1] = '\0';
+            strncpy(local_packages[local_package_count].sha256, repository_packages[i].sha256, sizeof(local_packages[0].sha256) - 1);
+            local_packages[local_package_count].sha256[sizeof(local_packages[0].sha256) - 1] = '\0';
+            strncpy(local_packages[local_package_count].url, repository_packages[i].url, sizeof(local_packages[0].url) - 1);
+            local_packages[local_package_count].url[sizeof(local_packages[0].url) - 1] = '\0';
+            local_packages[local_package_count].package_status = repository_packages[i].package_status; 
+            local_packages[local_package_count].present_in_repository = 1;
+            local_package_count++;
+        }
+    }
+
+    // free memory allocated for repository_packages
+    if (repository_packages != NULL) {
+        free(repository_packages);
+        repository_packages = NULL;
+    }
+
+    // FLAG packages in local list that are no longer in the remote repository
+    for (int i = 0; i < local_package_count; i++) {
+        if (!local_packages[i].present_in_repository) {
+            if (local_packages[i].package_status != 4) {
+                local_packages[i].package_status = 4;
+                printf("Package %s no longer exists in the repository.\n", local_packages[i].name);
+            }
+        }
+    }
+
+     if (allocated_packages > local_package_count * 2) { // If allocated is more than double needed
+         int new_size = (local_package_count == 0) ? 0 : local_package_count * 2;
+         Package *temp = realloc(local_packages, new_size * sizeof(Package));
+         if (temp != NULL || new_size == 0) { // realloc can return NULL for size 0, which is valid for freeing
+              local_packages = temp;
+             allocated_packages = new_size;
+            //  printf("DEBUG: Shrunk local_packages to size %d\n", allocated_packages);
+         }
+     }
 }
 
 // read and parse pp_pkg_list(local package list)
 void read_local_package_list() {
     FILE *file = fopen("pp_pkg_list", "r");
     if (file == NULL) {
-        for (int i = 0; i < MAX_PACKAGES; i++) {
-            local_packages[i].present_in_repository = 0;
+        // local_packages to NULL and allocated_packages to 0
+        if (local_packages != NULL) {
+            free(local_packages);
+            local_packages = NULL;
         }
+        local_package_count = 0;
+        allocated_packages = 0;
+        printf("pp_pkg_list not found. Initializing empty local package list.\n");
         return;
     }
 
-    char line[256]; // TODO: can be longer
-    while (fgets(line, sizeof(line), file) && local_package_count < MAX_PACKAGES) {
-        line[strcspn(line, "\n")] = 0;
+    // local_packages already has memory allocated, free it before re-reading
+    if (local_packages != NULL) {
+        free(local_packages);
+        local_packages = NULL;
+    }
+    local_package_count = 0;
+    allocated_packages = 0;
 
-        char *package_name = strtok(line, " ");
+    char line[256]; // TODO: can be longer
+    while (fgets(line, sizeof(line), file)) {
+        line[strcspn(line, "\n")] = 0;
+        char line_copy[256];
+        strncpy(line_copy, line, sizeof(line_copy) - 1);
+        line_copy[sizeof(line_copy) - 1] = '\0';
+
+        char *package_name = strtok(line_copy, " ");
         char *version = strtok(NULL, " ");
         char *sha256 = strtok(NULL, " ");
         char *url = strtok(NULL, " ");
+        char *package_status_str = strtok(NULL, " ");
 
-        if (package_name && version && sha256 && url) {
-            strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[local_package_count].name) - 1);
-            local_packages[local_package_count].name[sizeof(local_packages[local_package_count].name) - 1] = '\0';
-            strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[local_package_count].version) - 1);
-            local_packages[local_package_count].version[sizeof(local_packages[local_package_count].version) - 1] = '\0';
-            strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[local_package_count].sha256) - 1);
-            local_packages[local_package_count].sha256[sizeof(local_packages[local_package_count].sha256) - 1] = '\0';
-            strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[local_package_count].url) - 1);
-            local_packages[local_package_count].url[sizeof(local_packages[local_package_count].url) - 1] = '\0';
+        if (package_name && version && sha256 && url && package_status_str) { 
+             int package_status = atoi(package_status_str); // Convert status string to integer
+
+            // dynamic allocation
+            if (local_package_count >= allocated_packages) {
+                int new_size = (allocated_packages == 0) ? 10 : allocated_packages * 2;
+                Package *temp = realloc(local_packages, new_size * sizeof(Package));
+                if (temp == NULL) {
+                    perror("Error reallocating memory for packages while reading pp_pkg_list");
+                     fclose(file);
+                     return; // exit(1); free(local_packages);?
+                }
+                local_packages = temp;
+                allocated_packages = new_size;
+                // printf("DEBUG: Reallocated local_packages to size %d\n", allocated_packages);
+            }
+
+            strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[0].name) - 1);
+            local_packages[local_package_count].name[sizeof(local_packages[0].name) - 1] = '\0';
+            strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[0].version) - 1);
+            local_packages[local_package_count].version[sizeof(local_packages[0].version) - 1] = '\0';
+            strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[0].sha256) - 1);
+            local_packages[local_package_count].sha256[sizeof(local_packages[0].sha256) - 1] = '\0';
+            strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[0].url) - 1);
+            local_packages[local_package_count].url[sizeof(local_packages[0].url) - 1] = '\0';
+            local_packages[local_package_count].package_status = package_status;
             local_packages[local_package_count].present_in_repository = 0;
 
             local_package_count++;
@@ -156,6 +286,7 @@ void read_local_package_list() {
     }
 
     fclose(file);
+    printf("Read %d packages from pp_pkg_list.\n", local_package_count);
 }
 
 // search for a package
@@ -601,8 +732,8 @@ void remove_package(const char *package_name) {
 
 
 // upgrade packages that are installed locally (present in pp_info) but have a newer version available.
-void upgrade_packages() {
-    printf("Checking for upgrades...\n");
+void upgrade_packages(int filter_flag) {
+    printf("Checking for upgrades%s...\n", (filter_flag != -1) ? " with flag filter" : "");
 
     // TODO: lu command for this
     printf("Updating local system metadata...\n");
@@ -642,6 +773,10 @@ void upgrade_packages() {
                         while (*end != '\n' && *end != '#' && *end != '\0') {
                             end++;
                         }
+
+                        // null-terminate the version string at the end
+                        *end = '\0';
+
                         size_t version_len = end - version_str;
                         if (version_len > 0) {
                             strncpy(installed_version, version_str, sizeof(installed_version) - 1);
@@ -655,123 +790,125 @@ void upgrade_packages() {
 
             // TODO: compare versions
             if (strlen(installed_version) > 0 && strcmp(local_packages[i].version, installed_version) > 0) {
-                printf("Upgrade available for %s (Installed: %s, Available: %s)\n", 
-                        local_packages[i].name, 
-                        installed_version, 
-                        local_packages[i].version);
-                char confirm_upgrade[10];
-                printf("Upgrade %s? (Y/n): ", local_packages[i].name);
-                if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
-                    confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
+                if (filter_flag == -1 || local_packages[i].package_status == filter_flag) {
+                    printf("Upgrade available for %s (Installed: %s, Available: %s)\n", 
+                            local_packages[i].name, 
+                            installed_version, 
+                            local_packages[i].version);
+                    char confirm_upgrade[10];
+                    printf("Upgrade %s? (Y/n): ", local_packages[i].name);
+                    if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
+                        confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
 
-                    if (strlen(confirm_upgrade) == 0 ||
-                        strcmp(confirm_upgrade, "Y") == 0 || strcmp(confirm_upgrade, "y") == 0) {
+                        if (strlen(confirm_upgrade) == 0 ||
+                            strcmp(confirm_upgrade, "Y") == 0 || strcmp(confirm_upgrade, "y") == 0) {
 
-                        printf("Upgrading %s...\n", local_packages[i].name);
+                            printf("Upgrading %s...\n", local_packages[i].name);
 
-                        // uninstall the old version and install the new one.
-                        char full_manifest_content_in_info[4096] = "";
-                        char uninstall_script_name[256] = "";
+                            // uninstall the old version and install the new one.
+                            char full_manifest_content_in_info[4096] = "";
+                            char uninstall_script_name[256] = "";
 
-                        manifest_file_in_info = fopen(manifest_path_in_info, "r");
+                            manifest_file_in_info = fopen(manifest_path_in_info, "r");
 
-                        if (manifest_file_in_info != NULL) {
-                            char manifest_line_in_info[256];
-                            while (fgets(manifest_line_in_info, sizeof(manifest_line_in_info), manifest_file_in_info)) {
-                                strncat(full_manifest_content_in_info, manifest_line_in_info, sizeof(full_manifest_content_in_info) - strlen(full_manifest_content_in_info) - 1);
-                            }
-                            fclose(manifest_file_in_info);
-
-                            char *uninstall_script_line = strstr(full_manifest_content_in_info, "uninstall:");
-                            if (uninstall_script_line != NULL) {
-                                char *temp_script_name = uninstall_script_line + strlen("uninstall:");
-
-                                // trim whitespace
-                                while (*temp_script_name == ' ' || *temp_script_name == '\t') {
-                                    temp_script_name++;
+                            if (manifest_file_in_info != NULL) {
+                                char manifest_line_in_info[256];
+                                while (fgets(manifest_line_in_info, sizeof(manifest_line_in_info), manifest_file_in_info)) {
+                                    strncat(full_manifest_content_in_info, manifest_line_in_info, sizeof(full_manifest_content_in_info) - strlen(full_manifest_content_in_info) - 1);
                                 }
+                                fclose(manifest_file_in_info);
 
-                                // end of script name
-                                char *end = temp_script_name;
-                                while (*end != '\n' && *end != '#' && *end != '\0') {
-                                    end++;
-                                }
-                                size_t name_len = end - temp_script_name;
-                                if (name_len > 0) {
-                                     strncpy(uninstall_script_name, temp_script_name, sizeof(uninstall_script_name) - 1);
-                                     uninstall_script_name[sizeof(uninstall_script_name) - 1] = '\0';
-                                }
-                            }
-                        } else {
-                            perror("Error reading MANIFEST for old version uninstall script");
-                        }
+                                char *uninstall_script_line = strstr(full_manifest_content_in_info, "uninstall:");
+                                if (uninstall_script_line != NULL) {
+                                    char *temp_script_name = uninstall_script_line + strlen("uninstall:");
 
-
-                        if (strlen(uninstall_script_name) > 0) {
-                             char uninstall_script_relative_path[512];
-                            snprintf(uninstall_script_relative_path, sizeof(uninstall_script_relative_path), "%s/%s", pp_info_dir, uninstall_script_name);
-                            printf("Executing uninstall script for old version: %s\n", uninstall_script_relative_path);
-
-                            char full_uninstall_script_path[PATH_MAX];
-                            if (realpath(uninstall_script_relative_path, full_uninstall_script_path) == NULL) {
-                                 perror("Error getting full path for uninstall script");
-                                printf("Could not get full path for uninstall script '%s'. Skipping uninstall.\n", uninstall_script_relative_path);
-                            } else {
-                                 printf("Full uninstall script path: %s\n", full_uninstall_script_path);
-                                if (chmod(full_uninstall_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
-                                     printf("Made uninstall script executable.\n");
-                                    int script_status = system(full_uninstall_script_path);
-                                    if (script_status != 0) {
-                                        printf("Error executing uninstall script for old version: script failed with status %d\n", script_status);
-                                    } else {
-                                        printf("Uninstall script for old version executed successfully.\n");
+                                    // trim whitespace
+                                    while (*temp_script_name == ' ' || *temp_script_name == '\t') {
+                                        temp_script_name++;
                                     }
+
+                                    // end of script name
+                                    char *end = temp_script_name;
+                                    while (*end != '\n' && *end != '#' && *end != '\0') {
+                                        end++;
+                                    }
+                                    size_t name_len = end - temp_script_name;
+                                    if (name_len > 0) {
+                                        strncpy(uninstall_script_name, temp_script_name, sizeof(uninstall_script_name) - 1);
+                                        uninstall_script_name[sizeof(uninstall_script_name) - 1] = '\0';
+                                    }
+                                }
+                            } else {
+                                perror("Error reading MANIFEST for old version uninstall script");
+                            }
+
+
+                            if (strlen(uninstall_script_name) > 0) {
+                                char uninstall_script_relative_path[512];
+                                snprintf(uninstall_script_relative_path, sizeof(uninstall_script_relative_path), "%s/%s", pp_info_dir, uninstall_script_name);
+                                printf("Executing uninstall script for old version: %s\n", uninstall_script_relative_path);
+
+                                char full_uninstall_script_path[PATH_MAX];
+                                if (realpath(uninstall_script_relative_path, full_uninstall_script_path) == NULL) {
+                                    perror("Error getting full path for uninstall script");
+                                    printf("Could not get full path for uninstall script '%s'. Skipping uninstall.\n", uninstall_script_relative_path);
                                 } else {
-                                     perror("Error making uninstall script executable");
-                                    printf("Could not make uninstall script '%s' executable. Skipping uninstall.\n", full_uninstall_script_path);
+                                    printf("Full uninstall script path: %s\n", full_uninstall_script_path);
+                                    if (chmod(full_uninstall_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
+                                        printf("Made uninstall script executable.\n");
+                                        int script_status = system(full_uninstall_script_path);
+                                        if (script_status != 0) {
+                                            printf("Error executing uninstall script for old version: script failed with status %d\n", script_status);
+                                        } else {
+                                            printf("Uninstall script for old version executed successfully.\n");
+                                        }
+                                    } else {
+                                        perror("Error making uninstall script executable");
+                                        printf("Could not make uninstall script '%s' executable. Skipping uninstall.\n", full_uninstall_script_path);
+                                    }
+                                }
+                            } else {
+                                printf("No uninstall script specified in MANIFEST for old version.\n");
+                            }
+
+                            // elements to remove, manifest and uninstall script, directory
+                            printf("Removing package info directory for old version: %s\n", pp_info_dir);
+                            char old_manifest_path[512];
+                            snprintf(old_manifest_path, sizeof(old_manifest_path), "%s/MANIFEST", pp_info_dir);
+                            printf("Removing old MANIFEST file: %s\n", old_manifest_path);
+                            if (remove(old_manifest_path) != 0) {
+                                perror("Error removing old MANIFEST file");
+                            } else {
+                                printf("Old MANIFEST file removed.\n");
+                            }
+
+                            if (strlen(uninstall_script_name) > 0) {
+                                char old_uninstall_script_path[512];
+                                snprintf(old_uninstall_script_path, sizeof(old_uninstall_script_path), "%s/%s", pp_info_dir, uninstall_script_name);
+                                printf("Removing old uninstall script: %s\n", old_uninstall_script_path);
+                                if (remove(old_uninstall_script_path) != 0) {
+                                    perror("Error removing old uninstall script");
+                                } else {
+                                    printf("Old uninstall script removed.\n");
                                 }
                             }
-                        } else {
-                            printf("No uninstall script specified in MANIFEST for old version.\n");
-                        }
 
-                        // elements to remove, manifest and uninstall script, directory
-                        printf("Removing package info directory for old version: %s\n", pp_info_dir);
-                        char old_manifest_path[512];
-                        snprintf(old_manifest_path, sizeof(old_manifest_path), "%s/MANIFEST", pp_info_dir);
-                        printf("Removing old MANIFEST file: %s\n", old_manifest_path);
-                        if (remove(old_manifest_path) != 0) {
-                            perror("Error removing old MANIFEST file");
+                            if (rmdir(pp_info_dir) == -1) {
+                                perror("Error removing package info directory for old version");
+                                printf("Directory might not be empty after uninstall. You might need to manually remove the directory: %s\n", pp_info_dir);
+                            } else {
+                                printf("Package info directory for old version removed.\n");
+                            }
+                            printf("Installing new version of %s...\n", local_packages[i].name);
+                            install_package(local_packages[i].name);
+                        } else if (strcmp(confirm_upgrade, "N") == 0 || strcmp(confirm_upgrade, "n") == 0) {
+                            printf("Skipping upgrade for %s.\n", local_packages[i].name);
                         } else {
-                            printf("Old MANIFEST file removed.\n");
+                            printf("Invalid input. Skipping upgrade for %s.\n", local_packages[i].name);
                         }
-
-                        if (strlen(uninstall_script_name) > 0) {
-                            char old_uninstall_script_path[512];
-                             snprintf(old_uninstall_script_path, sizeof(old_uninstall_script_path), "%s/%s", pp_info_dir, uninstall_script_name);
-                             printf("Removing old uninstall script: %s\n", old_uninstall_script_path);
-                             if (remove(old_uninstall_script_path) != 0) {
-                                 perror("Error removing old uninstall script");
-                             } else {
-                                 printf("Old uninstall script removed.\n");
-                             }
-                        }
-
-                        if (rmdir(pp_info_dir) == -1) {
-                            perror("Error removing package info directory for old version");
-                            printf("Directory might not be empty after uninstall. You might need to manually remove the directory: %s\n", pp_info_dir);
-                        } else {
-                            printf("Package info directory for old version removed.\n");
-                        }
-                        printf("Installing new version of %s...\n", local_packages[i].name);
-                        install_package(local_packages[i].name);
-                    } else if (strcmp(confirm_upgrade, "N") == 0 || strcmp(confirm_upgrade, "n") == 0) {
-                        printf("Skipping upgrade for %s.\n", local_packages[i].name);
                     } else {
-                        printf("Invalid input. Skipping upgrade for %s.\n", local_packages[i].name);
+                        printf("Error reading confirmation input. Skipping upgrade for %s.\n", local_packages[i].name);
                     }
-                } else {
-                    printf("Error reading confirmation input. Skipping upgrade for %s.\n", local_packages[i].name);
                 }
             } else {
                 printf("Package %s is installed and up to date (Version: %s).\n",
@@ -783,6 +920,173 @@ void upgrade_packages() {
     }
     printf("Upgrade check complete.\n");
 }
+
+// update a specific package
+void update_package(const char *package_name) {
+    printf("Attempting to update package: %s \n", package_name);
+
+    // TODO: pass param to force update or not the local package list
+    read_local_package_list(); // Load local package list
+    read_repository_package_list(); // Update local list with repository info
+
+    int package_index = find_local_package(package_name);
+
+    if (package_index == -1) {
+        printf("Error: Package \'%s\' not found in local package list. Cannot update.\n", package_name);
+        return;
+    }
+
+    // check if the package is installed locally (exists in pp_info)
+    char pp_info_dir[512];
+    snprintf(pp_info_dir, sizeof(pp_info_dir), "pp_info/%s", package_name);
+    struct stat st;
+    int is_installed = (stat(pp_info_dir, &st) == 0 && S_ISDIR(st.st_mode));
+
+    if (!is_installed) {
+        printf("Package \'%s\' is not installed. Cannot update.\n", package_name);
+        return;
+    }
+
+    // read installed version from MANIFEST in pp_info
+    char manifest_path_in_info[512];
+    snprintf(manifest_path_in_info, sizeof(manifest_path_in_info), "%s/MANIFEST", pp_info_dir);
+    FILE *manifest_file_in_info = fopen(manifest_path_in_info, "r");
+    char installed_version[20] = ""; // buffer for installed version
+
+    if (manifest_file_in_info != NULL) {
+        char manifest_line[256];
+        while (fgets(manifest_line, sizeof(manifest_line), manifest_file_in_info)) {
+            if (strstr(manifest_line, "version:") != NULL) {
+                char *version_str = strstr(manifest_line, "version:") + strlen("version:");
+                // trim whitespace
+                while (*version_str == ' ' || *version_str == '\t') {
+                    version_str++;
+                }
+                // find end of version string, excluding newline
+                char *end = version_str;
+                while (*end != '\n' && *end != '#' && *end != '\0') {
+                    end++;
+                }
+                // null-terminate the version string at the end
+                *end = '\0'; // remove next line
+
+                size_t version_len = strlen(version_str); // use strlen after null-termination
+                if (version_len > 0) {
+                    strncpy(installed_version, version_str, sizeof(installed_version) - 1);
+                    installed_version[sizeof(installed_version) - 1] = '\0';
+                }
+                break;
+            }
+        }
+        fclose(manifest_file_in_info);
+    } else {
+        perror("Error opening MANIFEST file in pp_info");
+        printf("Cannot read installed version for package \'%s\'. Cannot update.\n", package_name);
+        return;
+    }
+
+    // compare versions
+    if (strcmp(local_packages[package_index].version, installed_version) > 0) {
+        printf("Upgrade available for %s (Installed: %s, Available: %s)\n",
+               package_name,
+               installed_version,
+               local_packages[package_index].version);
+
+        char confirm_upgrade[10];
+        printf("Upgrade %s? (Y/n): ", package_name);
+        if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
+            confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
+
+            if (strlen(confirm_upgrade) == 0 ||
+                strcmp(confirm_upgrade, "Y") == 0 || strcmp(confirm_upgrade, "y") == 0) {
+
+                printf("Upgrading %s...\n", package_name);
+                remove_package(package_name); // uninstall old version TODO: pass Y
+                install_package(package_name);  // install new version TODO: pass Y
+                printf("Upgrade of %s complete.\n", package_name);
+            } else if (strcmp(confirm_upgrade, "N") == 0 || strcmp(confirm_upgrade, "n") == 0) {
+                printf("Skipping upgrade for %s.\n", package_name);
+            } else {
+                printf("Invalid input. Skipping upgrade for %s.\n", package_name);
+            }
+        } else {
+            printf("Error reading confirmation input. Skipping upgrade for %s.\n", package_name);
+        }
+
+    } else {
+        printf("Package %s is already up to date (Version: %s).\n", package_name, installed_version);
+    }
+}
+
+// add a package manually
+void add_package_manual(const char *package_name, const char *version, const char *url, const char *sha256) {
+    printf("Attempting to add package manually: %s version %s from %s with SHA256 %s\n", package_name, version, url, sha256);
+
+    read_local_package_list(); // load the current local package list
+
+    // check if the package already exists in the local list
+    int existing_index = find_local_package(package_name);
+    if (existing_index != -1) {
+        printf("Error: Package \'%s\' already exists in the local package list. Cannot add.\n", package_name);
+        return;
+    }
+
+    // dynamic allocation for the new package
+    if (local_package_count >= allocated_packages) {
+        int new_size = (allocated_packages == 0) ? 10 : allocated_packages * 2; // start with 10, then double
+        Package *temp = realloc(local_packages, new_size * sizeof(Package));
+        if (temp == NULL) {
+            perror("Error reallocating memory for local packages");
+            return;
+        }
+        local_packages = temp;
+        allocated_packages = new_size;
+    }
+
+    // copy the package information into the new entry
+    strncpy(local_packages[local_package_count].name, package_name, sizeof(local_packages[0].name) - 1);
+    local_packages[local_package_count].name[sizeof(local_packages[0].name) - 1] = '\0';
+    strncpy(local_packages[local_package_count].version, version, sizeof(local_packages[0].version) - 1);
+    local_packages[local_package_count].version[sizeof(local_packages[0].version) - 1] = '\0';
+    strncpy(local_packages[local_package_count].url, url, sizeof(local_packages[0].url) - 1);
+    local_packages[local_package_count].url[sizeof(local_packages[0].url) - 1] = '\0';
+    strncpy(local_packages[local_package_count].sha256, sha256, sizeof(local_packages[0].sha256) - 1);
+    local_packages[local_package_count].sha256[sizeof(local_packages[0].sha256) - 1] = '\0';
+
+    local_packages[local_package_count].package_status = MANUAL_PKG_FLAG; // set the manual package flag
+    local_packages[local_package_count].present_in_repository = 0; // not from the repository(only in local)
+
+    local_package_count++;
+
+    write_local_package_list();
+
+    printf("Package \'%s\' added to the local package list.\n", package_name);
+}
+
+// list packages by flag
+void list_packages_by_flag(int flag) {
+    printf("Listing packages with flag %d:\n", flag);
+
+    read_local_package_list(); // load the current local package list
+
+    int found_count = 0;
+    for (int i = 0; i < local_package_count; i++) {
+        if (local_packages[i].package_status == flag) {
+            printf("  Name: %s, Version: %s, SHA256: %s, URL: %s, Status: %d\n",
+                   local_packages[i].name,
+                   local_packages[i].version,
+                   local_packages[i].sha256,
+                   local_packages[i].url,
+                   local_packages[i].package_status);
+            found_count++;
+        }
+    }
+
+    if (found_count == 0) {
+        printf("No packages found with flag %d.\n", flag);
+    }
+}
+
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -834,13 +1138,57 @@ int main(int argc, char *argv[]) {
         }
         remove_package(package_name);
     } else if (strcmp(command, "up") == 0) {
-        upgrade_packages();
+        int filter_flag = -1; // default to no filter
+        if (argc > 2) {
+            char *flag_arg = argv[2];
+            char *endptr;
+            long flag_value = strtol(flag_arg, &endptr, 10);
+
+            if (*endptr == '\0' && endptr != flag_arg) {
+                filter_flag = (int)flag_value;
+            } else {
+                printf("Warning: Invalid flag argument for 'up' command. Upgrading all applicable packages.\n");
+                // keep filter_flag as -1 for no filter
+            }
+        }
+        upgrade_packages(filter_flag); // Pass the filter flag
+    } else if (strcmp(command, "u") == 0) {
+        if (package_name == NULL) {
+            printf("Usage: pp u [package_name]\n");
+            return 1;
+        }
+        update_package(package_name);
+    } else if (strcmp(command, "a") == 0) {
+        if (argc < 6) { // need command, package_name, version, url, and sha256
+            printf("Usage: pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256\n");
+            return 1;
+        }
+        char *package_name_a = argv[2];
+        char *version_a = argv[3];
+        char *url_a = argv[4];
+        char *sha256_a = argv[5]; // Get the SHA256 argument
+        add_package_manual(package_name_a, version_a, url_a, sha256_a);
+    } else if (strcmp(command, "l") == 0) {
+        if (argc < 3) {
+            printf("Usage: pp l FLAG\n");
+            return 1;
+        }
+        int flag_to_list = atoi(argv[2]); // convert the flag argument to an integer for now
+        list_packages_by_flag(flag_to_list);
     }
     else {
         printf("Unknown command: %s\n", command);
         printf("Usage: pp [command] [package_name]\n");
-        printf("Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]\n");
+        printf("Usage: pp [i|r|s|e|u] PACKAGENAME | pp a PACKAGENAME VERSION LOCAL_PATH/URL SHA256 | pp l FLAG | pp [up [FLAG]|lu]\n");
         return 1;
     }
+
+
+    // free allocated memory before exiting
+    if (local_packages != NULL) {
+        free(local_packages);
+        local_packages = NULL; // set to NULL after freeing
+    }
+
     return 0;
 }
