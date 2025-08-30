@@ -1,1 +1,0 @@
-rm $HOME/pp/opt/app/helloworld
