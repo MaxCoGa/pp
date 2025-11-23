@@ -31,6 +31,7 @@ MANIFEST format
   - `dependencies:` — a space-separated list of dependencies (note: `pp` currently does not enforce dependencies)
   - `install:` — relative path to the install script inside the package (e.g. `install.sh`) (optional but recommended)
   - `uninstall:` — relative path to the uninstall script inside the package (e.g. `uninstall.sh`) (optional but recommended)
+  - `helper:` — space-separated list of helper files inside the package that should be preserved in `pp_info/<pkg>/` and kept available to the package manager during removal or upgrades (e.g. `helper: uninstall-gcc-from-dir.sh uninstall.sh`). Helpers are copied into `pp_info/<pkg>/` and made executable where applicable.
 
 Example MANIFEST
 ```
@@ -40,12 +41,28 @@ description: helloworld package
 dependencies: bash
 install: install.sh
 uninstall: uninstall.sh
+helper: uninstall-gcc-from-dir.sh uninstall.sh
 ```
 
 Notes about fields
 - `dependencies:`; `pp` currently doesn't parse or resolve dependencies automatically, this is informational for now.
 - `install:` and `uninstall:` — these should be executable shell scripts in the package. `pp` will try to make them executable and then run them.
 - `pp` saves the `MANIFEST` and the uninstall script into `pp_info/<pkgname>/` to support subsequent removal and upgrades.
+
+Helper files
+- `helper:` — If present, `pp` will copy each filename listed after `helper:` from the extracted package into `pp_info/<pkg>/` during install and will attempt to remove them during uninstall. This is useful for packages that ship additional helper scripts or support files the uninstall step depends on (for example, a repo-level helper that removes a staged prefix).
+
+Scaffolding packages with `new-paranpackage.sh`
+- There is a helper script at `scripts/new-paranpackage.sh` that scaffolds a new package directory template. It creates a `MANIFEST`, `install.sh`, `uninstall.sh`, and a `files/` layout. After scaffolding, add any helper files you need to the package directory and list them in `MANIFEST` using the `helper:` key so `pp` will preserve them in `pp_info` at install-time.
+
+Example `helper:` usage:
+```
+name: gcc
+version: 14.1.0
+install: install.sh
+uninstall: uninstall.sh
+helper: uninstall-gcc-from-dir.sh uninstall.sh
+```
 
 Repository / index
 - `pp` expects a repository list in `pkg_list` (for now this can be a local file). Each line in `pkg_list` follows the format used by `pp` and `pp_pkg_list`:
