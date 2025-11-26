@@ -482,51 +482,109 @@ void install_package(const char *package_name) {
                     char *uninstall_script_line = strstr(full_manifest_content, "uninstall:");
                     if (uninstall_script_line != NULL) {
                         char *uninstall_script_name = uninstall_script_line + strlen("uninstall:");
-                         // leading whitespace
+                        // leading whitespace
                         while (*uninstall_script_name == ' ' || *uninstall_script_name == '\t') {
                             uninstall_script_name++;
                         }
-                        // end of script name
-                         char *end = uninstall_script_name;
-                         while (*end != '\n' && *end != '#' && *end != '\0') {
-                             end++;
-                         }
-                         *end = '\0';
+                        // find end of script name without modifying the manifest buffer
+                        char *end = uninstall_script_name;
+                        while (*end != '\n' && *end != '#' && *end != '\0') {
+                            end++;
+                        }
+                        size_t name_len = end - uninstall_script_name;
+                        if (name_len > 0) {
+                            char uninstall_name_buf[256];
+                            size_t copy_len = (name_len < sizeof(uninstall_name_buf)-1) ? name_len : (sizeof(uninstall_name_buf)-1);
+                            strncpy(uninstall_name_buf, uninstall_script_name, copy_len);
+                            uninstall_name_buf[copy_len] = '\0';
 
-                        if (strlen(uninstall_script_name) > 0) {
                             char source_uninstall_script_path[512];
-                            snprintf(source_uninstall_script_path, sizeof(source_uninstall_script_path), "%s/%s", untar_dir, uninstall_script_name);
+                            snprintf(source_uninstall_script_path, sizeof(source_uninstall_script_path), "%s/%s", untar_dir, uninstall_name_buf);
 
                             char dest_uninstall_script_path[512];
-                            snprintf(dest_uninstall_script_path, sizeof(dest_uninstall_script_path), "%s/%s", pp_info_dir, uninstall_script_name);
+                            snprintf(dest_uninstall_script_path, sizeof(dest_uninstall_script_path), "%s/%s", pp_info_dir, uninstall_name_buf);
 
                             printf("Looking for uninstall script at: %s\n", source_uninstall_script_path);
                             FILE *source_uninstall_script = fopen(source_uninstall_script_path, "rb");
                             if (source_uninstall_script == NULL) {
                                 perror("Error opening uninstall script");
-                                printf("Uninstall script '%s' not found in package.\n", uninstall_script_name);
+                                printf("Uninstall script '%s' not found in package.\n", uninstall_name_buf);
                             } else {
-                                 printf("Saving uninstall script to: %s\n", dest_uninstall_script_path);
+                                printf("Saving uninstall script to: %s\n", dest_uninstall_script_path);
                                 FILE *dest_uninstall_script = fopen(dest_uninstall_script_path, "wb");
                                 if (dest_uninstall_script == NULL) {
                                     perror("Error saving uninstall script");
                                     fclose(source_uninstall_script);
                                 } else {
-                                     char script_buffer[4096];
+                                    char script_buffer[4096];
                                     size_t script_bytes_read;
-                                     while ((script_bytes_read = fread(script_buffer, 1, sizeof(script_buffer), source_uninstall_script)) > 0) {
+                                    while ((script_bytes_read = fread(script_buffer, 1, sizeof(script_buffer), source_uninstall_script)) > 0) {
                                         fwrite(script_buffer, 1, script_bytes_read, dest_uninstall_script);
                                     }
                                     fclose(source_uninstall_script);
                                     fclose(dest_uninstall_script);
+                                    if (chmod(dest_uninstall_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
+                                        printf("Uninstall script made executable in pp_info.\n");
+                                    } else {
+                                        perror("Error making uninstall script executable in pp_info");
+                                    }
                                     printf("Uninstall script saved to pp_info.\n");
                                 }
                             }
                         } else {
-                             printf("Uninstall script specified in MANIFEST is empty.\n");
+                            printf("Uninstall script specified in MANIFEST is empty.\n");
                         }
                     } else {
-                         printf("No uninstall script specified in MANIFEST.\n");
+                        printf("No uninstall script specified in MANIFEST.\n");
+                    }
+
+                    /* New: parse a 'helper:' key in MANIFEST to copy additional helper files
+                       Example: helper: uninstall-gcc-from-dir.sh uninstall.sh */
+                    char *helpers_line = strstr(full_manifest_content, "helper:");
+                    if (helpers_line != NULL) {
+                        char *p = helpers_line + strlen("helper:");
+                        // skip leading whitespace
+                        while (*p == ' ' || *p == '\t') p++;
+                        // read tokens until end of line
+                        while (*p != '\0' && *p != '\n') {
+                            char token[256];
+                            int ti = 0;
+                            // collect non-whitespace token
+                            while (*p != ' ' && *p != '\t' && *p != '\n' && *p != '#' && *p != '\0' && ti < (int)sizeof(token)-1) {
+                                token[ti++] = *p++;
+                            }
+                            token[ti] = '\0';
+                            if (ti > 0) {
+                                char src_path[512];
+                                char dst_path[512];
+                                snprintf(src_path, sizeof(src_path), "%s/%s", untar_dir, token);
+                                snprintf(dst_path, sizeof(dst_path), "%s/%s", pp_info_dir, token);
+                                printf("Looking for helper file at: %s\n", src_path);
+                                FILE *fh_src = fopen(src_path, "rb");
+                                if (fh_src == NULL) {
+                                    perror("Error opening helper file");
+                                    printf("Helper file '%s' not found in package.\n", token);
+                                } else {
+                                    FILE *fh_dst = fopen(dst_path, "wb");
+                                    if (fh_dst == NULL) {
+                                        perror("Error saving helper file");
+                                        fclose(fh_src);
+                                    } else {
+                                        char buf[4096]; size_t r;
+                                        while ((r = fread(buf, 1, sizeof(buf), fh_src)) > 0) fwrite(buf, 1, r, fh_dst);
+                                        fclose(fh_src); fclose(fh_dst);
+                                        if (chmod(dst_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
+                                            printf("Helper '%s' made executable in pp_info.\n", token);
+                                        } else {
+                                            perror("Error making helper executable");
+                                        }
+                                        printf("Helper '%s' saved to pp_info.\n", token);
+                                    }
+                                }
+                            }
+                            // skip whitespace to next token
+                            while (*p == ' ' || *p == '\t') p++;
+                        }
                     }
                 }
 
@@ -651,8 +709,10 @@ void remove_package(const char *package_name) {
                     }
                     size_t name_len = end - temp_script_name;
                     if (name_len > 0) {
-                        strncpy(uninstall_script_name, temp_script_name, sizeof(uninstall_script_name) - 1);
-                        uninstall_script_name[sizeof(uninstall_script_name) - 1] = '\0';
+                        // copy only the name_len characters into uninstall_script_name
+                        size_t copy_len = (name_len < sizeof(uninstall_script_name) - 1) ? name_len : (sizeof(uninstall_script_name) - 1);
+                        strncpy(uninstall_script_name, temp_script_name, copy_len);
+                        uninstall_script_name[copy_len] = '\0';
                         snprintf(uninstall_script_path, sizeof(uninstall_script_path), "%s/%s", pp_info_dir, uninstall_script_name);
 
                         printf("Looking for uninstall script at: %s\n", uninstall_script_path);
@@ -708,6 +768,31 @@ void remove_package(const char *package_name) {
                              printf("Uninstall script removed.\n");
                          }
                      }
+                }
+
+                // Also remove any helper files listed in MANIFEST under 'helper:'
+                char *helpers_line_rem = strstr(full_manifest_content, "helper:");
+                if (helpers_line_rem != NULL) {
+                    char *p = helpers_line_rem + strlen("helper:");
+                    while (*p == ' ' || *p == '\t') p++;
+                    while (*p != '\0' && *p != '\n') {
+                        char token[256]; int ti = 0;
+                        while (*p != ' ' && *p != '\t' && *p != '\n' && *p != '#' && *p != '\0' && ti < (int)sizeof(token)-1) {
+                            token[ti++] = *p++;
+                        }
+                        token[ti] = '\0';
+                        if (ti > 0) {
+                            char helper_path[512];
+                            snprintf(helper_path, sizeof(helper_path), "%s/%s", pp_info_dir, token);
+                            printf("Removing helper file: %s\n", helper_path);
+                            if (remove(helper_path) != 0) {
+                                perror("Error removing helper file");
+                            } else {
+                                printf("Helper file removed: %s\n", helper_path);
+                            }
+                        }
+                        while (*p == ' ' || *p == '\t') p++;
+                    }
                 }
             }
 
