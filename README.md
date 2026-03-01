@@ -1,7 +1,22 @@
 # pp
 tar -cvf helloworld.tar.gz -C helloworld .
 
+## Building
+
+### Dynamic build (recommended for most users)
+```bash
 gcc -o pp pp.c -lcurl
+```
+Size: ~50KB, requires libcurl and dependencies installed on the system.
+
+### Static build (portable, no dependencies)
+Build a fully static binary using musl-libc in Docker:
+```bash
+./build-static.sh
+```
+This creates `pp-static` (~7.5MB) that runs on any Linux system without requiring any libraries.
+
+The Dockerfile uses Alpine Linux with musl-libc to compile a static binary with all dependencies embedded.
 
 Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 

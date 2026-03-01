@@ -393,6 +393,7 @@ void install_package(const char *package_name) {
 
     char confirm_install[10];
     printf("Install %s? (Y/n): ", package_name);
+    fflush(stdout);
     if (fgets(confirm_install, sizeof(confirm_install), stdin) != NULL) {
         confirm_install[strcspn(confirm_install, "\n")] = 0;
 
@@ -711,6 +712,7 @@ void remove_package(const char *package_name) {
 
     char confirm_remove[10];
     printf("Remove %s? (Y/n): ", package_name);
+    fflush(stdout);
     if (fgets(confirm_remove, sizeof(confirm_remove), stdin) != NULL) {
         confirm_remove[strcspn(confirm_remove, "\n")] = 0;
 
@@ -925,6 +927,7 @@ void upgrade_packages(int filter_flag) {
                             local_packages[i].version);
                     char confirm_upgrade[10];
                     printf("Upgrade %s? (Y/n): ", local_packages[i].name);
+                    fflush(stdout);
                     if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
                         confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
 
@@ -1122,6 +1125,7 @@ void update_package(const char *package_name) {
 
         char confirm_upgrade[10];
         printf("Upgrade %s? (Y/n): ", package_name);
+        fflush(stdout);
         if (fgets(confirm_upgrade, sizeof(confirm_upgrade), stdin) != NULL) {
             confirm_upgrade[strcspn(confirm_upgrade, "\n")] = 0;
 

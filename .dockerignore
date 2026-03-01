@@ -1,0 +1,23 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+pp
+pp-static
+*.o
+*.a
+
+# Package manager data
+pp_download/
+pp_info/
+pp_pkg_list
+pkg_list
+
+# Documentation
+README.md
+PACKAGING.md
+LICENSE
+
+# Scripts
+build-static.sh
