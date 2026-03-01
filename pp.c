@@ -7,6 +7,8 @@
 #include <limits.h>
 #include <libgen.h>
 #include <curl/curl.h>
+#include <archive.h>
+#include <archive_entry.h>
 
 #define UPDATE_FLAG 0
 #define SECURITY_UPDATE_FLAG 1
@@ -74,6 +76,49 @@ int download_file_with_curl(const char *url, const char *output_path) {
     curl_easy_cleanup(curl);
 
     return success;
+}
+
+// extract tar file using libarchive
+int extract_tar_file(const char *tar_path, const char *extract_dir) {
+    struct archive *a;
+    struct archive_entry *entry;
+    int r;
+    char full_path[PATH_MAX];
+
+    a = archive_read_new();
+    archive_read_support_format_tar(a);
+    archive_read_support_filter_all(a);
+
+    r = archive_read_open_filename(a, tar_path, 10240);
+    if (r != ARCHIVE_OK) {
+        fprintf(stderr, "Error opening tar file: %s\n", archive_error_string(a));
+        archive_read_free(a);
+        return 0;
+    }
+
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        // construct full path in extract directory
+        const char *pathname = archive_entry_pathname(entry);
+        snprintf(full_path, sizeof(full_path), "%s/%s", extract_dir, pathname);
+        archive_entry_set_pathname(entry, full_path);
+
+        // acl flags
+        int flags = ARCHIVE_EXTRACT_OWNER | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_ACL;
+        r = archive_read_extract(a, entry, flags);
+        if (r != ARCHIVE_OK) {
+            fprintf(stderr, "Error extracting file %s: %s\n", pathname, archive_error_string(a));
+            archive_read_free(a);
+            return 0;
+        }
+    }
+
+    r = archive_read_free(a);
+    if (r != ARCHIVE_OK) {
+        fprintf(stderr, "Error closing archive: %s\n", archive_error_string(a));
+        return 0;
+    }
+
+    return 1;
 }
 
 // find a package in the local_packages array by exact name
@@ -464,12 +509,9 @@ void install_package(const char *package_name) {
                 }
             }
 
-            char tar_command[1024];
-            snprintf(tar_command, sizeof(tar_command), "tar -xf \"%s\" -C \"%s\"", download_path, untar_dir);
-            printf("Executing command: %s\n", tar_command);
-            int tar_status = system(tar_command);
-             if (tar_status != 0) {
-                printf("Error untarring package: tar command failed with status %d\n", tar_status);
+            printf("Extracting package archive...\n");
+            if (!extract_tar_file(download_path, untar_dir)) {
+                printf("Error extracting package archive\n");
                 return;
             }
             printf("Untar complete.\n");

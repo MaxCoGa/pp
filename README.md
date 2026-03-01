@@ -5,9 +5,9 @@ tar -cvf helloworld.tar.gz -C helloworld .
 
 ### Dynamic build (recommended for most users)
 ```bash
-gcc -o pp pp.c -lcurl
+gcc -o pp pp.c -lcurl -larchive && echo "Dynamic build successful"
 ```
-Size: ~50KB, requires libcurl and dependencies installed on the system.
+Size: ~60KB, requires libcurl, libarchive and dependencies installed on the system.
 
 ### Static build (portable, no dependencies)
 Build a fully static binary using musl-libc in Docker:

@@ -19,7 +19,19 @@ RUN apk add --no-cache \
     libidn2-static \
     libpsl-static \
     libunistring-static \
-    c-ares-dev
+    c-ares-dev \
+    libarchive-dev \
+    libarchive-static \
+    bzip2-static \
+    lz4-static \
+    xz-static \
+    acl-static \
+    libarchive-dev \
+    libarchive-static \
+    bzip2-static \
+    lz4-static \
+    xz-static \
+    acl-static
 
 # Set working directory
 WORKDIR /build
@@ -43,6 +55,11 @@ RUN gcc -o pp pp.c \
     -lz \
     -lbrotlidec \
     -lbrotlicommon \
+    -larchive \
+    -lbz2 \
+    -llz4 \
+    -llzma \
+    -lacl \
     -lpthread \
     && strip pp
 
