@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <libgen.h>
+#include <curl/curl.h>
 
 #define UPDATE_FLAG 0
 #define SECURITY_UPDATE_FLAG 1
@@ -27,6 +28,53 @@ typedef struct {
 Package *local_packages = NULL;
 int local_package_count = 0;
 int allocated_packages = 0;
+
+// callback function for libcurl to write downloaded data to a file
+static size_t write_data_to_file(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    size_t written = fwrite(ptr, size, nmemb, stream);
+    return written;
+}
+
+// download a file using libcurl
+int download_file_with_curl(const char *url, const char *output_path) {
+    CURL *curl;
+    CURLcode res;
+    FILE *fp;
+    int success = 0;
+
+    curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "Error: Failed to initialize libcurl\n");
+        return 0;
+    }
+
+    fp = fopen(output_path, "wb");
+    if (!fp) {
+        perror("Error opening output file for download");
+        curl_easy_cleanup(curl);
+        return 0;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data_to_file);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // follow redirects (-L flag)
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L); // fail on HTTP errors
+
+    printf("Downloading from %s...\n", url);
+    res = curl_easy_perform(curl);
+
+    if (res != CURLE_OK) {
+        fprintf(stderr, "Error downloading file: %s\n", curl_easy_strerror(res));
+    } else {
+        success = 1;
+    }
+
+    fclose(fp);
+    curl_easy_cleanup(curl);
+
+    return success;
+}
 
 // find a package in the local_packages array by exact name
 int find_local_package(const char *package_name) {
@@ -373,16 +421,11 @@ void install_package(const char *package_name) {
 
 
             if (strncmp(package_url, "http://", 7) == 0 || strncmp(package_url, "https://", 8) == 0) { // url
-                printf("Downloading package from %s...\n", package_url);
-                char curl_command[1024];
-                snprintf(curl_command, sizeof(curl_command), "curl -L \"%s\" -o \"%s\"", package_url, download_path);
-                printf("Executing command: %s\n", curl_command);
-                int curl_status = system(curl_command);
-                if (curl_status != 0) {
-                    printf("Error downloading package: curl command failed with status %d\n", curl_status);
+                if (!download_file_with_curl(package_url, download_path)) {
+                    printf("Error downloading package from %s\n", package_url);
                     return;
                 }
-                 printf("Download complete.\n");
+                printf("Download complete.\n");
             } else { // local file path
                 printf("Copying package from local path %s...\n", package_url);
                 FILE *source_file = fopen(package_url, "rb");

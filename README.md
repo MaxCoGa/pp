@@ -1,7 +1,7 @@
 # pp
 tar -cvf helloworld.tar.gz -C helloworld .
 
-gcc pp.c -o pp
+gcc -o pp pp.c -lcurl
 
 Usage: pp [i|r|s|e] PACKAGENAME | pp [up|lu]
 

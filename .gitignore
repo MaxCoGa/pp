@@ -1,2 +1,5 @@
 pp
 helloworld.tar.gz
+pp_download/*
+pp_info/*
+pp_pkg_list
