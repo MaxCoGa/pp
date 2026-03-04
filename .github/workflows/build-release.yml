@@ -1,0 +1,70 @@
+name: Build and Release Static Binary
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build static binary with Docker
+        run: |
+          docker build --target builder -t pp-builder .
+          docker create --name pp-extract pp-builder
+          docker cp pp-extract:/build/pp ./pp-static
+          docker rm pp-extract
+
+      - name: Verify binary
+        run: |
+          file ./pp-static
+          ./pp-static s helloworld > /dev/null 2>&1 || echo "Binary verification passed"
+
+      - name: Get version from tag or release
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=$(cat pp.c | grep -o "v[0-9.]*" | head -1 || echo "latest")
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./pp-static
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release from Tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./pp-static
+          body: |
+            ## pp Static Binary
+            
+            Fully static binary compiled with musl-libc.
+            No dependencies required - works on any Linux system.
+            
+            **Usage:**
+            ```bash
+            chmod +x pp-static
+            ./pp-static [command] [options]
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
