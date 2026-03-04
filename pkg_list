@@ -1,4 +1,7 @@
 bash 5.2.21 ad5b38410e3bf0e9bcc20e2765f5e3f9 https://ftp.gnu.org/gnu/bash/bash-5.2.21.tar.gz 0
 gcc 1.2.3 dasdas https://github.com/MaxCoGa/paran-base/releases/download/v0.0.1/gcc-v0.0.1.tar.gz 1
 acl 1.2 dwdw https://github.com/MaxCoGa/paran-base/releases/download/v0.0.1/acl-v0.0.1.tar.gz 1
+autoconf 1.2.3 dasd https://github.com/MaxCoGa/paran-base/releases/download/v0.0.1/attr-v0.0.1.tar.gz 1
+attr 1.2.3 adwqdwwq https://github.com/MaxCoGa/paran-base/releases/download/v0.0.1/attr-v0.0.1.tar.gz 1
+automake 1.2.3 asdw https://github.com/MaxCoGa/paran-base/releases/download/v0.0.1/automake-v0.0.1.tar.gz 1
 helloworld 1.2.3 590765dee95907dbc3c856f7255bd669 https://github.com/MaxCoGa/helloworld-paran-package/releases/download/v0.0.1/helloworld.tar.gz 1

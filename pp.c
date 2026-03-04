@@ -9,6 +9,7 @@
 #include <curl/curl.h>
 #include <archive.h>
 #include <archive_entry.h>
+#include <sys/wait.h>
 
 #define UPDATE_FLAG 0
 #define SECURITY_UPDATE_FLAG 1
@@ -720,53 +721,26 @@ void install_package(const char *package_name) {
                                 char script_name_copy[256];
                                 strncpy(script_name_copy, install_script_name, sizeof(script_name_copy) - 1);
                                 script_name_copy[sizeof(script_name_copy) - 1] = '\0';
-                                char *script_base_name = basename(script_name_copy);
-
-                                char compat_exec_dir[PATH_MAX];
-                                snprintf(compat_exec_dir, sizeof(compat_exec_dir), "%s/.pp_exec", untar_dir);
-                                if (mkdir(compat_exec_dir, 0755) == -1 && errno != EEXIST) {
-                                    perror("Error creating temporary install execution directory");
-                                    printf("Could not execute install script '%s'.\n", full_install_script_path);
-                                    return;
-                                }
-
-                                char compat_exec_script_path[PATH_MAX];
-                                snprintf(compat_exec_script_path, sizeof(compat_exec_script_path), "%s/%s", compat_exec_dir, script_base_name);
-
-                                FILE *install_src = fopen(full_install_script_path, "rb");
-                                if (install_src == NULL) {
-                                    perror("Error opening install script for compatibility execution");
-                                    return;
-                                }
-
-                                FILE *install_dst = fopen(compat_exec_script_path, "wb");
-                                if (install_dst == NULL) {
-                                    perror("Error creating compatibility install script");
-                                    fclose(install_src);
-                                    return;
-                                }
-
-                                char install_copy_buf[4096];
-                                size_t install_copy_read;
-                                while ((install_copy_read = fread(install_copy_buf, 1, sizeof(install_copy_buf), install_src)) > 0) {
-                                    fwrite(install_copy_buf, 1, install_copy_read, install_dst);
-                                }
-                                fclose(install_src);
-                                fclose(install_dst);
-
-                                if (chmod(compat_exec_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0) {
-                                    perror("Error making compatibility install script executable");
-                                    return;
-                                }
 
                                 printf("Executing install script: %s\n", full_install_script_path);
                                 char install_command[PATH_MAX * 3];
-                                snprintf(install_command, sizeof(install_command), "cd \"%s\" && \"./.pp_exec/%s\"", untar_dir, script_base_name);
+                                snprintf(install_command, sizeof(install_command), "cd \"%s\" && \"%s\"", untar_dir, full_install_script_path);
                                 int script_status = system(install_command);
-                                if (script_status != 0) {
-                                    printf("Error executing install script: script failed with status %d\n", script_status);
+                                if (script_status == -1) {
+                                    perror("Error invoking system() to run install script");
                                 } else {
-                                    printf("Install script execution complete.\n");
+                                    if (WIFEXITED(script_status)) {
+                                        int exit_code = WEXITSTATUS(script_status);
+                                        if (exit_code != 0) {
+                                            printf("Install script exited with code %d\n", exit_code);
+                                        } else {
+                                            printf("Install script execution complete.\n");
+                                        }
+                                    } else if (WIFSIGNALED(script_status)) {
+                                        printf("Install script terminated by signal %d\n", WTERMSIG(script_status));
+                                    } else {
+                                        printf("Install script ended with unexpected status %d\n", script_status);
+                                    }
                                 }
                             } else {
                                  perror("Error making install script executable");
