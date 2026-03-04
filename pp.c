@@ -102,8 +102,23 @@ int extract_tar_file(const char *tar_path, const char *extract_dir) {
         snprintf(full_path, sizeof(full_path), "%s/%s", extract_dir, pathname);
         archive_entry_set_pathname(entry, full_path);
 
-        // acl flags
-        int flags = ARCHIVE_EXTRACT_OWNER | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_ACL;
+        /* If this entry is a hardlink, adjust its target path to the
+         * extraction directory so libarchive can resolve the link. */
+        const char *hardlink = archive_entry_hardlink(entry);
+        if (hardlink != NULL && hardlink[0] != '\0') {
+            const char *hl = hardlink;
+            if (hl[0] == '.' && hl[1] == '/') hl += 2; /* strip leading ./ */
+            char full_hardlink[PATH_MAX];
+            snprintf(full_hardlink, sizeof(full_hardlink), "%s/%s", extract_dir, hl);
+            archive_entry_set_hardlink(entry, full_hardlink);
+        }
+
+        // preserve ACLs, permissions and timestamps for all users;
+        // preserve owner/group only when running as root to avoid chown failures.
+        int flags = ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_ACL;
+        if (geteuid() == 0) {
+            flags |= ARCHIVE_EXTRACT_OWNER;
+        }
         r = archive_read_extract(a, entry, flags);
         if (r != ARCHIVE_OK) {
             fprintf(stderr, "Error extracting file %s: %s\n", pathname, archive_error_string(a));
@@ -702,8 +717,52 @@ void install_package(const char *package_name) {
                              printf("Full install script path: %s\n", full_install_script_path);
                             if (chmod(full_install_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) {
                                  printf("Made install script executable.\n");
-                                 printf("Executing install script: %s\n", full_install_script_path);
-                                 int script_status = system(full_install_script_path);
+                                char script_name_copy[256];
+                                strncpy(script_name_copy, install_script_name, sizeof(script_name_copy) - 1);
+                                script_name_copy[sizeof(script_name_copy) - 1] = '\0';
+                                char *script_base_name = basename(script_name_copy);
+
+                                char compat_exec_dir[PATH_MAX];
+                                snprintf(compat_exec_dir, sizeof(compat_exec_dir), "%s/.pp_exec", untar_dir);
+                                if (mkdir(compat_exec_dir, 0755) == -1 && errno != EEXIST) {
+                                    perror("Error creating temporary install execution directory");
+                                    printf("Could not execute install script '%s'.\n", full_install_script_path);
+                                    return;
+                                }
+
+                                char compat_exec_script_path[PATH_MAX];
+                                snprintf(compat_exec_script_path, sizeof(compat_exec_script_path), "%s/%s", compat_exec_dir, script_base_name);
+
+                                FILE *install_src = fopen(full_install_script_path, "rb");
+                                if (install_src == NULL) {
+                                    perror("Error opening install script for compatibility execution");
+                                    return;
+                                }
+
+                                FILE *install_dst = fopen(compat_exec_script_path, "wb");
+                                if (install_dst == NULL) {
+                                    perror("Error creating compatibility install script");
+                                    fclose(install_src);
+                                    return;
+                                }
+
+                                char install_copy_buf[4096];
+                                size_t install_copy_read;
+                                while ((install_copy_read = fread(install_copy_buf, 1, sizeof(install_copy_buf), install_src)) > 0) {
+                                    fwrite(install_copy_buf, 1, install_copy_read, install_dst);
+                                }
+                                fclose(install_src);
+                                fclose(install_dst);
+
+                                if (chmod(compat_exec_script_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0) {
+                                    perror("Error making compatibility install script executable");
+                                    return;
+                                }
+
+                                printf("Executing install script: %s\n", full_install_script_path);
+                                char install_command[PATH_MAX * 3];
+                                snprintf(install_command, sizeof(install_command), "cd \"%s\" && \"./.pp_exec/%s\"", untar_dir, script_base_name);
+                                int script_status = system(install_command);
                                 if (script_status != 0) {
                                     printf("Error executing install script: script failed with status %d\n", script_status);
                                 } else {
